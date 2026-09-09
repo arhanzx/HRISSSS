@@ -1,4 +1,3 @@
-
 // ============================================================
 // ADMIN / PROFIL DROPDOWN
 // ============================================================
@@ -1534,14 +1533,133 @@ function deleteEmployee(id){
   if(admActiveTab==='karyawan') setAdmTab('karyawan');
 }
 
+// ============================================================
+// REKAP ABSENSI - HELPER PERHITUNGAN
+// ============================================================
+// Catatan asumsi: hari kerja dihitung Senin-Jumat (Sabtu/Minggu dianggap libur).
+// Tidak ada aturan jam masuk baku yang tersimpan di aplikasi, sehingga rekap ini
+// berfokus pada Hadir / Cuti Disetujui / Tidak Absen, bukan status terlambat.
+
+function daysInMonth(year, month1based){
+  return new Date(year, month1based, 0).getDate();
+}
+
+function workingDaysForEmployeeInMonth(e, year, month1based){
+  const now = new Date();
+  const isFuture = (year > now.getFullYear()) || (year === now.getFullYear() && month1based > now.getMonth()+1);
+  if(isFuture) return 0;
+  const isCurrent = (year === now.getFullYear() && month1based === now.getMonth()+1);
+  const lastDay = isCurrent ? Math.min(now.getDate(), daysInMonth(year, month1based)) : daysInMonth(year, month1based);
+  const join = e ? parseJoinDate(e.join) : null;
+  const joinFloor = join ? new Date(join.getFullYear(), join.getMonth(), join.getDate()) : null;
+
+  let count = 0;
+  for(let d = 1; d <= lastDay; d++){
+    const dt = new Date(year, month1based-1, d);
+    if(joinFloor && dt < joinFloor) continue;
+    const dow = dt.getDay();
+    if(dow !== 0 && dow !== 6) count++;
+  }
+  return count;
+}
+
+function approvedLeaveDaysInMonth(empId, year, month1based){
+  const monthStart = new Date(year, month1based-1, 1);
+  const monthEnd = new Date(year, month1based-1, daysInMonth(year, month1based));
+  let total = 0;
+  leaves.filter(l => l.empId === empId && l.status === 'Disetujui').forEach(l => {
+    const s = new Date(l.start+"T00:00:00");
+    const en = new Date(l.end+"T00:00:00");
+    const from = s > monthStart ? s : monthStart;
+    const to = en < monthEnd ? en : monthEnd;
+    if(from <= to) total += Math.round((to-from)/86400000) + 1;
+  });
+  return total;
+}
+
+function attendanceRecapForMonth(month, empFilter){
+  const [y, mo] = month.split("-").map(Number);
+  const monthAttendance = attendance.filter(a => a.date && a.date.startsWith(month));
+  return employees
+    .filter(e => empFilter === 'all' || e.id === empFilter)
+    .map(e => {
+      const hadir = monthAttendance.filter(a => a.empId === e.id).length;
+      const lengkap = monthAttendance.filter(a => a.empId === e.id && a.checkOut).length;
+      const cuti = approvedLeaveDaysInMonth(e.id, y, mo);
+      const hariKerja = workingDaysForEmployeeInMonth(e, y, mo);
+      const tidakHadir = Math.max(hariKerja - hadir - cuti, 0);
+      return {emp:e, hadir, lengkap, cuti, hariKerja, tidakHadir};
+    });
+}
+
+function selectAdminAttendanceMonth(month){
+  if(!month) return;
+  window.adminSelectedAttendanceMonth = month;
+  setAdmTab("absensi");
+}
+function selectAdminAttendanceEmployee(empId){
+  window.adminSelectedAttendanceEmp = empId || 'all';
+  setAdmTab("absensi");
+}
+
 function renderAdmAbsensi(){
-  const list = attendance.slice().reverse();
+  const month = window.adminSelectedAttendanceMonth || currentMonthKey();
+  const empFilter = window.adminSelectedAttendanceEmp || 'all';
+  const recap = attendanceRecapForMonth(month, empFilter);
+
+  const list = attendance
+    .filter(a => a.date && a.date.startsWith(month) && (empFilter === 'all' || a.empId === empFilter))
+    .slice().reverse();
+
+  const totalHadirBulanIni = recap.reduce((s,r)=>s+r.hadir,0);
+  const totalTidakHadir = recap.reduce((s,r)=>s+r.tidakHadir,0);
+
   return `
     <div class="grid2" style="margin-bottom:16px;">
       <div class="stat-box blue"><div class="num">${attendance.filter(a=>a.date===todayISO()).length}</div><div class="lbl">Hadir Hari Ini</div></div>
       <div class="stat-box"><div class="num">${employees.length - attendance.filter(a=>a.date===todayISO()).length}</div><div class="lbl">Belum Absen</div></div>
     </div>
-    <p class="section-label">Seluruh Rekap Absensi</p>
+
+    <div class="card">
+      <label class="form-label">Bulan Rekap</label>
+      <input id="admAttMonthPicker" class="form-input" type="month"
+        value="${month}" onchange="selectAdminAttendanceMonth(this.value)">
+      <label class="form-label" style="margin-top:12px;">Karyawan</label>
+      <select id="admAttEmpPicker" class="form-input" onchange="selectAdminAttendanceEmployee(this.value)">
+        <option value="all" ${empFilter==='all'?'selected':''}>Semua Karyawan</option>
+        ${employees.map(e=>`<option value="${e.id}" ${empFilter===e.id?'selected':''}>${e.name}</option>`).join("")}
+      </select>
+    </div>
+
+    <div class="grid2" style="margin-bottom:16px;">
+      <div class="stat-box green"><div class="num">${totalHadirBulanIni}</div><div class="lbl">Total Hadir · ${monthLabel(month)}</div></div>
+      <div class="stat-box red"><div class="num">${totalTidakHadir}</div><div class="lbl">Total Tidak Absen (estimasi)</div></div>
+    </div>
+
+    <p class="section-label">Ringkasan per Karyawan · ${monthLabel(month)}</p>
+    ${recap.length===0 ? emptyState("📍","Belum ada karyawan","Tambahkan karyawan untuk melihat rekap") :
+      recap.map(r=>`
+        <div class="card">
+          <div class="row" style="margin-bottom:10px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div class="li-avatar">${r.emp.initials}</div>
+              <div><p class="li-title">${r.emp.name}</p><p class="li-sub">${r.emp.position}</p></div>
+            </div>
+          </div>
+          <div class="slip-line"><span>Hari Kerja Berjalan</span><span style="font-weight:700;">${r.hariKerja} hari</span></div>
+          <div class="slip-line"><span>Hadir</span><span style="font-weight:700;color:var(--green);">${r.hadir} hari</span></div>
+          <div class="slip-line"><span>Absen Lengkap (masuk+pulang)</span><span style="font-weight:700;">${r.lengkap} hari</span></div>
+          <div class="slip-line"><span>Cuti/Izin Disetujui</span><span style="font-weight:700;color:var(--blue);">${r.cuti} hari</span></div>
+          <div class="slip-line total"><span>Tidak Absen (estimasi)</span><span style="font-weight:800;color:var(--red);">${r.tidakHadir} hari</span></div>
+        </div>
+      `).join("")
+    }
+
+    <div style="margin:14px 0 4px;">
+      <button class="btn btn-navy" style="width:100%;" onclick="downloadAttendanceRecap('${month}','${empFilter}')">📝 Unduh Rekap Absensi (Word)</button>
+    </div>
+
+    <p class="section-label">Riwayat Absensi · ${monthLabel(month)}</p>
     ${list.length===0 ? emptyState("📍","Belum ada data absensi","Data akan muncul setelah karyawan melakukan absen") :
       list.map(a=>{
         const e = empById(a.empId);
@@ -1553,6 +1671,63 @@ function renderAdmAbsensi(){
       }).join("")
     }
   `;
+}
+
+// ============================================================
+// DOWNLOAD REKAP ABSENSI (WORD)
+// ============================================================
+function downloadAttendanceRecap(month, empFilter){
+  const recap = attendanceRecapForMonth(month, empFilter || 'all');
+  if(recap.length===0){ showToast("Tidak ada data untuk diunduh."); return; }
+
+  const row = (r) => `<tr>
+    <td>${escapeWordHtml(r.emp.name)}</td>
+    <td>${escapeWordHtml(r.emp.position)}</td>
+    <td style="text-align:center;">${r.hariKerja}</td>
+    <td style="text-align:center;">${r.hadir}</td>
+    <td style="text-align:center;">${r.lengkap}</td>
+    <td style="text-align:center;">${r.cuti}</td>
+    <td style="text-align:center;">${r.tidakHadir}</td>
+  </tr>`;
+
+  const content = `
+<html>
+<head><meta charset="utf-8">
+<title>Rekap Absensi - ${escapeWordHtml(monthLabel(month))}</title>
+<style>
+body{font-family:Arial,sans-serif;font-size:11pt;color:#222}
+h1{text-align:center;font-size:18pt;margin-bottom:4px}
+h2{text-align:center;font-size:12pt;font-weight:normal;margin-top:0}
+table{width:100%;border-collapse:collapse;margin-top:18px}
+td,th{border:1px solid #999;padding:8px;text-align:left}
+th{background:#f2f2f2}
+</style></head>
+<body>
+<h1>REKAP ABSENSI</h1>
+<h2>${escapeWordHtml(monthLabel(month))}</h2>
+<table>
+<tr>
+  <th>Nama</th><th>Jabatan</th><th>Hari Kerja</th><th>Hadir</th><th>Lengkap</th><th>Cuti/Izin</th><th>Tidak Absen</th>
+</tr>
+${recap.map(row).join("")}
+</table>
+<p style="margin-top:22px;font-size:9pt;color:#666">
+Hari kerja dihitung Senin-Jumat, dibatasi sampai tanggal berjalan untuk bulan yang sedang berlangsung.
+Kolom "Tidak Absen" merupakan estimasi (hari kerja dikurangi hadir dan cuti/izin disetujui).
+Dokumen diterbitkan melalui Nadi HRIS.
+</p>
+</body></html>`;
+
+  const blob = new Blob(["\ufeff", content], {type:"application/msword"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const suffix = (empFilter && empFilter !== 'all') ? (empById(empFilter)?.name || 'Karyawan') : 'Semua-Karyawan';
+  a.download = `Rekap-Absensi-${suffix.replace(/[^a-z0-9]+/gi,"-")}-${month}.doc`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
 }
 function viewAttendanceDetail(id){
   const a = attendance.find(x=>x.id===id);
