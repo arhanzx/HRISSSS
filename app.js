@@ -328,7 +328,7 @@ function renderEmpHome(){
       <p class="hero-name">Halo, ${e.name.split(" ")[0]} 👋</p>
       <div class="hero-stats">
         <div class="hero-stat"><div class="v">${hadir}</div><div class="l">Hadir bulan ini</div></div>
-        <div class="hero-stat"><div class="v">12</div><div class="l">Sisa jatah cuti</div></div>
+        <div class="hero-stat"><div class="v">4</div><div class="l">Sisa jatah cuti</div></div>
         <div class="hero-stat"><div class="v">${pending}</div><div class="l">Cuti menunggu</div></div>
       </div>
     </div>
@@ -409,7 +409,7 @@ function renderEmpCuti(){
       <div class="row">
         <div>
           <p style="margin:0; font-size:12.5px; color:var(--navy); font-weight:600;">Sisa jatah cuti tahunan</p>
-          <p style="margin:4px 0 0; font-size:22px; font-weight:800; color:var(--navy);">12 hari</p>
+          <p style="margin:4px 0 0; font-size:22px; font-weight:800; color:var(--navy);"4 hari</p>
         </div>
         <button class="btn btn-navy btn-sm" onclick="openLeaveForm()">+ Ajukan Cuti</button>
       </div>
