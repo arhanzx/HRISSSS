@@ -149,6 +149,18 @@ async function deleteEmployeeFromDB(id){
   if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
 }
 
+async function deleteLeaveFromDB(id){
+  if(!supabaseClient) return;
+  const {error}=await requireSupabase().from('leaves').delete().eq('id',id);
+  if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
+}
+
+async function deleteLeavesFromDB(ids){
+  if(!supabaseClient || !ids || !ids.length) return;
+  const {error}=await requireSupabase().from('leaves').delete().in('id',ids);
+  if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
+}
+
 
 /* ===================== HELPERS ===================== */
 // ============================================================
@@ -1978,10 +1990,29 @@ function viewSlipAdmin(id,selectedMonth=null){
 }
 
 function renderAdmCuti(){
-  const list = leaves.slice().reverse();
+  const monthFilter = window.adminSelectedCutiMonth || 'all';
+  const allMonths = Array.from(new Set(leaves.map(l=>String(l.start||'').slice(0,7)).filter(Boolean))).sort().reverse();
+  const list = leaves
+    .filter(l=> monthFilter==='all' || String(l.start||'').slice(0,7)===monthFilter)
+    .slice().reverse();
+
   return `
-    <p class="section-label">Semua Pengajuan Cuti</p>
-    ${list.length===0 ? emptyState("🗓️","Belum ada pengajuan cuti","Pengajuan dari karyawan akan muncul di sini") :
+    <div class="card">
+      <label class="form-label">Filter Bulan Pengajuan</label>
+      <select id="admCutiMonthPicker" class="form-input" onchange="selectAdminCutiMonth(this.value)">
+        <option value="all" ${monthFilter==='all'?'selected':''}>Semua Bulan</option>
+        ${allMonths.map(m=>`<option value="${m}" ${monthFilter===m?'selected':''}>${monthLabel(m)}</option>`).join("")}
+      </select>
+      <p class="form-help">Pilih bulan tertentu untuk melihat, atau mengosongkan, riwayat cuti bulan tersebut saja.</p>
+    </div>
+
+    <button class="btn btn-outline-red" style="width:100%; margin-bottom:16px;" ${list.length===0?'disabled':''}
+      onclick="confirmClearLeaves('${monthFilter}')">
+      🗑 Kosongkan ${monthFilter==='all' ? 'Semua Riwayat Cuti' : 'Riwayat Cuti ' + monthLabel(monthFilter)}
+    </button>
+
+    <p class="section-label">${monthFilter==='all' ? 'Semua Pengajuan Cuti' : 'Pengajuan Cuti · ' + monthLabel(monthFilter)}</p>
+    ${list.length===0 ? emptyState("🗓️","Belum ada pengajuan cuti","Pengajuan dari karyawan akan muncul di sini, atau sudah dikosongkan untuk bulan ini") :
       list.map(l=>{
         const e = empById(l.empId);
         return `<div class="card">
@@ -1994,11 +2025,13 @@ function renderAdmCuti(){
           </div>
           <div class="slip-line"><span>Tanggal</span><span style="font-weight:700;">${formatDateID(l.start)} – ${formatDateID(l.end)}</span></div>
           <p style="font-size:12.5px; color:var(--muted); margin:8px 0 12px;">${l.reason}</p>
-          ${l.status==='Menunggu' ? `
-            <div style="display:flex; gap:8px;">
+          <div style="display:flex; gap:8px;">
+            ${l.status==='Menunggu' ? `
               <button class="btn btn-outline-red btn-sm" style="flex:1;" onclick="decideLeave('${l.id}','Ditolak')">Tolak</button>
               <button class="btn btn-navy btn-sm" style="flex:1;" onclick="decideLeave('${l.id}','Disetujui')">Setujui</button>
-            </div>` : ``}
+            ` : ``}
+            <button class="btn btn-soft btn-sm" style="${l.status==='Menunggu' ? '' : 'flex:1;'}" onclick="confirmDeleteLeave('${l.id}')">🗑 Hapus</button>
+          </div>
         </div>`;
       }).join("")
     }
@@ -2011,6 +2044,64 @@ function decideLeave(id, status){
   l.status = status;
   saveAppData();
   showToast(status==='Disetujui' ? "Pengajuan cuti disetujui" : "Pengajuan cuti ditolak");
+  setAdmTab('cuti');
+}
+
+function selectAdminCutiMonth(month){
+  window.adminSelectedCutiMonth = month || 'all';
+  setAdmTab('cuti');
+}
+
+function confirmDeleteLeave(id){
+  const l = leaves.find(x=>x.id===id);
+  if(!l) return;
+  const e = empById(l.empId);
+  openModal("Hapus Pengajuan Cuti", `
+    <p style="font-size:14px; margin:0;">Yakin ingin menghapus pengajuan cuti <strong>${e ? e.name : '-'}</strong>
+    (${formatDateID(l.start)} – ${formatDateID(l.end)})? Tindakan ini tidak dapat dibatalkan.</p>
+  `, `
+    <div style="display:flex; gap:10px;">
+      <button class="btn btn-soft" onclick="closeModal()">Batal</button>
+      <button class="btn btn-red" onclick="deleteLeaveRecord('${id}')">Hapus</button>
+    </div>
+  `);
+}
+function deleteLeaveRecord(id){
+  leaves = leaves.filter(l=>l.id!==id);
+  saveAppData();
+  deleteLeaveFromDB(id);
+  closeModal();
+  showToast("Pengajuan cuti dihapus");
+  if(admActiveTab==='cuti') setAdmTab('cuti');
+}
+
+function confirmClearLeaves(monthFilter){
+  const targetIds = leaves
+    .filter(l=> monthFilter==='all' || String(l.start||'').slice(0,7)===monthFilter)
+    .map(l=>l.id);
+  if(targetIds.length===0){ showToast("Tidak ada data cuti untuk dihapus."); return; }
+
+  const label = monthFilter==='all' ? 'seluruh riwayat cuti' : `riwayat cuti bulan ${monthLabel(monthFilter)}`;
+  openModal("Kosongkan Data Cuti", `
+    <p style="font-size:14px; margin:0;">Yakin ingin menghapus ${label} (${targetIds.length} pengajuan)?
+    Tindakan ini tidak dapat dibatalkan.</p>
+  `, `
+    <div style="display:flex; gap:10px;">
+      <button class="btn btn-soft" onclick="closeModal()">Batal</button>
+      <button class="btn btn-red" onclick="clearLeaves('${monthFilter}')">Ya, Kosongkan</button>
+    </div>
+  `);
+}
+function clearLeaves(monthFilter){
+  const targetIds = leaves
+    .filter(l=> monthFilter==='all' || String(l.start||'').slice(0,7)===monthFilter)
+    .map(l=>l.id);
+  leaves = leaves.filter(l=> !targetIds.includes(l.id));
+  saveAppData();
+  deleteLeavesFromDB(targetIds);
+  closeModal();
+  showToast("Data cuti dikosongkan");
+  window.adminSelectedCutiMonth = 'all';
   setAdmTab('cuti');
 }
 
