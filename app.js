@@ -44,17 +44,9 @@ function adminLogout(){
 /* ===================== DATA + SUPABASE ===================== */
 const ADMIN_PASSWORD = "admin123";
 
-let employees = [
-  {id:"E01", name:"Aditya Pratama", initials:"AP", position:"Frontend Developer", dept:"Teknologi", phone:"0812-3456-7801", email:"aditya@nadi.co.id", join:"12 Jan 2022", base:8500000, allowance:1200000, deduction:250000},
-  {id:"E02", name:"Sri Wulandari", initials:"SW", position:"HR Generalist", dept:"Human Resources", phone:"0812-3456-7802", email:"sri.w@nadi.co.id", join:"03 Mar 2021", base:7800000, allowance:1000000, deduction:200000},
-  {id:"E03", name:"Budi Santoso", initials:"BS", position:"Sales Executive", dept:"Marketing", phone:"0812-3456-7803", email:"budi.s@nadi.co.id", join:"20 Jul 2023", base:6500000, allowance:1500000, deduction:180000},
-  {id:"E04", name:"Rina Amelia", initials:"RA", position:"Finance Staff", dept:"Keuangan", phone:"0812-3456-7804", email:"rina.a@nadi.co.id", join:"08 Sep 2020", base:7200000, allowance:900000, deduction:220000},
-];
+let employees = [];
 let attendance = [];
-let leaves = [
-  {id:"L01", empId:"E03", type:"Cuti Tahunan", start:"2026-09-10", end:"2026-09-12", reason:"Acara keluarga di luar kota", status:"Menunggu", applied:"28 Agu 2026"},
-  {id:"L02", empId:"E02", type:"Sakit", start:"2026-08-25", end:"2026-08-26", reason:"Demam, surat dokter terlampir", status:"Disetujui", applied:"24 Agu 2026"},
-];
+let leaves = [];
 let leaveSeq = 3, attSeq = 1;
 let session = {role:null, empId:null};
 let cameraStream = null;
@@ -117,7 +109,7 @@ async function loadAppData(){
       sb.from('salary_edits').select('*')
     ]);
     for(const result of [er,ar,lr,spr,ser]) if(result.error) throw result.error;
-    if(er.data?.length) employees=er.data.map(rowToEmployee);
+    employees = (er.data || []).map(rowToEmployee);
     attendance=(ar.data||[]).map(rowToAttendance);
     leaves=(lr.data||[]).map(rowToLeave);
     salaryPublicationsCache={};
