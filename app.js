@@ -1,3 +1,4 @@
+
 // ============================================================
 // ADMIN / PROFIL DROPDOWN
 // ============================================================
@@ -409,7 +410,7 @@ function renderEmpCuti(){
       <div class="row">
         <div>
           <p style="margin:0; font-size:12.5px; color:var(--navy); font-weight:600;">Sisa jatah cuti tahunan</p>
-          <p style="margin:4px 0 0; font-size:22px; font-weight:800; color:var(--navy);"4 hari</p>
+          <p style="margin:4px 0 0; font-size:22px; font-weight:800; color:var(--navy);">4 hari</p>
         </div>
         <button class="btn btn-navy btn-sm" onclick="openLeaveForm()">+ Ajukan Cuti</button>
       </div>
@@ -1380,7 +1381,7 @@ let admActiveTab = 'dashboard';
 function setAdmTab(tab){
   admActiveTab = tab;
   document.getElementById('admHeaderTitle').textContent = admTitles[tab];
-  document.querySelectorAll('#admTabbar .tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  document.querySelectorAll('#admTabbar .tab-btn, #admSidebarNav .tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
   const c = document.getElementById('admContent');
   if(tab==='dashboard') c.innerHTML = renderAdmDashboard();
   if(tab==='karyawan') c.innerHTML = renderAdmKaryawan();
@@ -1392,17 +1393,70 @@ function setAdmTab(tab){
 
 function renderAdmDashboard(){
   const hadirHariIni = attendance.filter(a=>a.date===todayISO()).length;
+  const belumAbsen = Math.max(employees.length - hadirHariIni, 0);
   const pendingCuti = leaves.filter(l=>l.status==='Menunggu').length;
   const totalGaji = employees.reduce((s,e)=>s+netSalary(e),0);
+  const hadirPct = employees.length ? Math.round((hadirHariIni/employees.length)*100) : 0;
+
   return `
-    <div class="grid2" style="margin-bottom:12px;">
-      <div class="stat-box blue"><div class="num">${employees.length}</div><div class="lbl">Total Karyawan</div></div>
-      <div class="stat-box green"><div class="num">${hadirHariIni}</div><div class="lbl">Hadir Hari Ini</div></div>
-      <div class="stat-box red"><div class="num">${pendingCuti}</div><div class="lbl">Cuti Menunggu</div></div>
-      <div class="stat-box"><div class="num" style="font-size:15px;">${rupiah(totalGaji)}</div><div class="lbl">Estimasi Gaji Bulan Ini</div></div>
+    <div class="kpi-grid">
+      <div class="kpi-card kpi-hero">
+        <div class="kpi-top">
+          <span class="kpi-label">Total Karyawan</span>
+          <span class="kpi-icon">🗂️</span>
+        </div>
+        <div>
+          <p class="kpi-value">${employees.length}</p>
+          <p class="kpi-change">Terdaftar aktif di sistem</p>
+        </div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-top">
+          <span class="kpi-label">Hadir Hari Ini</span>
+          <span class="kpi-icon">✅</span>
+        </div>
+        <div>
+          <p class="kpi-value">${hadirHariIni}</p>
+          <p class="kpi-change up">${hadirPct}% dari total karyawan</p>
+        </div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-top">
+          <span class="kpi-label">Cuti Menunggu</span>
+          <span class="kpi-icon">🗓️</span>
+        </div>
+        <div>
+          <p class="kpi-value">${pendingCuti}</p>
+          <p class="kpi-change ${pendingCuti>0?'attn':''}">${pendingCuti>0?'Perlu ditinjau':'Tidak ada antrean'}</p>
+        </div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-top">
+          <span class="kpi-label">Estimasi Gaji Bulan Ini</span>
+          <span class="kpi-icon">💰</span>
+        </div>
+        <div>
+          <p class="kpi-value" style="font-size:18px;">${rupiah(totalGaji)}</p>
+          <p class="kpi-change">Berdasarkan aturan gaji aktif</p>
+        </div>
+      </div>
     </div>
+
+    <div class="card">
+      <p class="section-label" style="margin-top:0;">Absensi Hari Ini</p>
+      <div class="att-progress">
+        <div class="seg" style="width:${hadirPct}%; background:var(--green);"></div>
+        <div class="seg" style="width:${100-hadirPct}%; background:var(--border);"></div>
+      </div>
+      <div class="att-legend">
+        <div class="li"><span class="dot" style="background:var(--green);"></span><div><p class="lb">${hadirHariIni}</p><p class="lv">Sudah Absen</p></div></div>
+        <div class="li"><span class="dot" style="background:var(--border);"></span><div><p class="lb">${belumAbsen}</p><p class="lv">Belum Absen</p></div></div>
+      </div>
+    </div>
+
     <p class="section-label">Pengajuan Cuti Terbaru</p>
-    ${leaves.slice().reverse().slice(0,3).map(l=>{
+    ${leaves.length===0 ? emptyState("🗓️","Belum ada pengajuan cuti","Pengajuan dari karyawan akan muncul di sini") :
+    leaves.slice().reverse().slice(0,3).map(l=>{
       const e = empById(l.empId);
       return `<div class="list-item" onclick="setAdmTab('cuti')">
         <div class="li-avatar">${e.initials}</div>
