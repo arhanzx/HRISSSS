@@ -3,21 +3,26 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#16305C">
+<meta name="theme-color" content="#0EA5E9">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Nadi HRIS">
+<meta name="apple-mobile-web-app-title" content="KaryaOne">
 <meta name="format-detection" content="telephone=no">
-<title>Nadi HRIS</title>
+<title>KaryaOne</title>
+<link rel="icon" type="image/png" href="assets/logo-icon.png">
+<link rel="apple-touch-icon" href="assets/logo-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 <!-- ================= LOGIN SCREEN ================= -->
   <div class="screen" id="loginScreen">
     <div class="login-body">
-      <div class="brand-mark">N</div>
-      <h1 class="login-title">Nadi HRIS</h1>
+      <img src="assets/logo-vertical.png" alt="KaryaOne" class="login-logo">
+      <p class="login-tagline">Kelola Tim, Wujudkan Karya</p>
       <p class="login-sub">Absensi, cuti, dan penggajian karyawan dalam satu aplikasi. Pilih jenis akses untuk masuk.</p>
 
       <div class="role-card emp" onclick="openEmployeePicker()">
@@ -36,7 +41,7 @@
         </div>
       </div>
 
-      <div class="login-foot">Nadi HRIS · versi demo 1.0</div>
+      <div class="login-foot">KaryaOne · versi demo 1.0</div>
     </div>
   </div>
 
@@ -45,7 +50,7 @@
     <div class="app-header">
       <div>
         <p class="htitle" id="empHeaderTitle">Beranda</p>
-        <p class="hsub">Nadi HRIS · Karyawan</p>
+        <p class="hsub">KaryaOne · Karyawan</p>
       </div>
       <div class="avatar" onclick="setEmpTab('profil')" id="empAvatar">A</div>
     </div>
@@ -61,29 +66,46 @@
 
   <!-- ================= ADMIN APP ================= -->
   <div class="screen hidden" id="admApp">
-    <div class="app-header">
-      <div>
-        <p class="htitle" id="admHeaderTitle">Dashboard</p>
-        <p class="hsub">Nadi HRIS · Admin HR</p>
-      </div>
-
-      <div class="admin-profile-wrap">
-        <button class="admin-profile-btn" type="button" onclick="toggleAdminProfileMenu(event)" aria-label="Profil Admin">
-          <span class="admin-profile-avatar">A</span>
-          <span class="admin-profile-name">Admin</span>
-          <span class="admin-profile-chevron">⌄</span>
-        </button>
-        <div class="admin-profile-menu" id="adminProfileMenu">
-          <div class="admin-profile-menu-head">
-            <strong>Admin</strong>
-            <span>Akses Administrator</span>
-          </div>
-          <button type="button" onclick="adminLogout(); closeAdminProfileMenu();">↪&nbsp; Keluar Akun</button>
+    <div class="admin-shell">
+      <aside class="admin-sidebar" id="admSidebarNav">
+        <div class="sidebar-brand">
+          <img src="assets/logo-horizontal.png" alt="KaryaOne" class="sidebar-logo">
         </div>
+        <nav>
+          <button class="tab-btn" data-tab="dashboard" onclick="setAdmTab('dashboard')"><span class="ticon">📊</span>Dashboard</button>
+          <button class="tab-btn" data-tab="karyawan" onclick="setAdmTab('karyawan')"><span class="ticon">🗂️</span>Karyawan</button>
+          <button class="tab-btn" data-tab="absensi" onclick="setAdmTab('absensi')"><span class="ticon">📍</span>Absensi</button>
+          <button class="tab-btn" data-tab="penggajian" onclick="setAdmTab('penggajian')"><span class="ticon">💰</span>Gaji</button>
+          <button class="tab-btn" data-tab="cuti" onclick="setAdmTab('cuti')"><span class="ticon">🗓️</span>Cuti</button>
+        </nav>
+      </aside>
+
+      <div class="admin-main">
+        <div class="app-header">
+          <div>
+            <p class="htitle" id="admHeaderTitle">Dashboard</p>
+            <p class="hsub">KaryaOne · Admin HR</p>
+          </div>
+
+          <div class="admin-profile-wrap">
+            <button class="admin-profile-btn" type="button" onclick="toggleAdminProfileMenu(event)" aria-label="Profil Admin">
+              <span class="admin-profile-avatar">A</span>
+              <span class="admin-profile-name">Admin</span>
+              <span class="admin-profile-chevron">⌄</span>
+            </button>
+            <div class="admin-profile-menu" id="adminProfileMenu">
+              <div class="admin-profile-menu-head">
+                <strong>Admin</strong>
+                <span>Akses Administrator</span>
+              </div>
+              <button type="button" onclick="adminLogout(); closeAdminProfileMenu();">↪&nbsp; Keluar Akun</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="content" id="admContent"></div>
       </div>
     </div>
-
-    <div class="content" id="admContent"></div>
 
     <div class="tabbar" id="admTabbar">
       <button class="tab-btn" data-tab="dashboard" onclick="setAdmTab('dashboard')"><span class="ticon">📊</span>Dashboard</button>
