@@ -1,4 +1,3 @@
-
 // ============================================================
 // ADMIN / PROFIL DROPDOWN
 // ============================================================
@@ -33,7 +32,7 @@ function adminLogout(){
 }
 
 // ============================================================
-// NADI HRIS - JAVASCRIPT
+// KARYAONE HRIS - JAVASCRIPT
 // Semua JavaScript berada dalam SATU file.
 // Komentar pembatas dibuat agar setiap fitur mudah ditemukan.
 // ============================================================
@@ -47,6 +46,7 @@ const ADMIN_PASSWORD = "admin123";
 let employees = [];
 let attendance = [];
 let leaves = [];
+let overtime = [];
 let leaveSeq = 3, attSeq = 1;
 let session = {role:null, empId:null};
 let cameraStream = null;
@@ -93,6 +93,12 @@ function leaveToRow(l){
 function rowToLeave(r){
   return {id:r.id,empId:r.emp_id,type:r.type,start:String(r.start_date).slice(0,10),end:String(r.end_date).slice(0,10),reason:r.reason||'',status:r.status||'Menunggu',applied:r.applied||''};
 }
+function overtimeToRow(o){
+  return {id:o.id,emp_id:o.empId,date:o.date,time_start:o.timeStart,time_end:o.timeEnd,hours:numberOrZero(o.hours),reason:o.reason,status:o.status,applied:o.applied,updated_at:new Date().toISOString()};
+}
+function rowToOvertime(r){
+  return {id:r.id,empId:r.emp_id,date:String(r.date).slice(0,10),timeStart:r.time_start,timeEnd:r.time_end,hours:Number(r.hours)||0,reason:r.reason||'',status:r.status||'Menunggu',applied:r.applied||''};
+}
 
 async function loadAppData(){
   if(!supabaseClient){
@@ -101,23 +107,26 @@ async function loadAppData(){
   }
   try{
     const sb=requireSupabase();
-    const [er,ar,lr,spr,ser]=await Promise.all([
+    const [er,ar,lr,spr,ser,otr]=await Promise.all([
       sb.from('employees').select('*').order('id'),
       sb.from('attendance').select('*').order('date',{ascending:false}),
       sb.from('leaves').select('*').order('created_at',{ascending:false}),
       sb.from('salary_publications').select('*'),
-      sb.from('salary_edits').select('*')
+      sb.from('salary_edits').select('*'),
+      sb.from('overtime').select('*').order('created_at',{ascending:false})
     ]);
-    for(const result of [er,ar,lr,spr,ser]) if(result.error) throw result.error;
+    for(const result of [er,ar,lr,spr,ser,otr]) if(result.error) throw result.error;
     employees = (er.data || []).map(rowToEmployee);
     attendance=(ar.data||[]).map(rowToAttendance);
     leaves=(lr.data||[]).map(rowToLeave);
+    overtime=(otr.data||[]).map(rowToOvertime);
     salaryPublicationsCache={};
     (spr.data||[]).forEach(r=>salaryPublicationsCache[`${r.emp_id}_${r.month}`]=r);
     salaryEditsCache={};
     (ser.data||[]).forEach(r=>salaryEditsCache[`${r.emp_id}_${r.month}`]=r);
     const leaveNums=leaves.map(l=>Number(String(l.id||'').replace(/^L/,''))).filter(Number.isFinite);
     const attNums=attendance.map(a=>Number(String(a.id||'').replace(/^A/,''))).filter(Number.isFinite);
+    const otNums=overtime.map(o=>Number(String(o.id||'').replace(/^O/,''))).filter(Number.isFinite);
     leaveSeq=leaveNums.length?Math.max(...leaveNums)+1:3;
     attSeq=attNums.length?Math.max(...attNums)+1:1;
   }catch(error){
@@ -130,12 +139,13 @@ async function saveAppData(){
   if(!supabaseClient) return false;
   try{
     const sb=requireSupabase();
-    const [er,ar,lr]=await Promise.all([
+    const [er,ar,lr,otr]=await Promise.all([
       sb.from('employees').upsert(employees.map(employeeToRow)),
       sb.from('attendance').upsert(attendance.map(attendanceToRow)),
-      sb.from('leaves').upsert(leaves.map(leaveToRow))
+      sb.from('leaves').upsert(leaves.map(leaveToRow)),
+      sb.from('overtime').upsert(overtime.map(overtimeToRow))
     ]);
-    for(const result of [er,ar,lr]) if(result.error) throw result.error;
+    for(const result of [er,ar,lr,otr]) if(result.error) throw result.error;
     return true;
   }catch(error){
     console.error('Supabase save error',error);
@@ -162,6 +172,30 @@ async function deleteLeavesFromDB(ids){
   if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
 }
 
+async function deleteOvertimeFromDB(id){
+  if(!supabaseClient) return;
+  const {error}=await requireSupabase().from('overtime').delete().eq('id',id);
+  if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
+}
+
+
+async function deleteOvertimesFromDB(ids){
+  if(!supabaseClient || !ids || !ids.length) return;
+  const {error}=await requireSupabase().from('overtime').delete().in('id',ids);
+  if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
+}
+
+async function deleteAttendanceFromDB(id){
+  if(!supabaseClient) return;
+  const {error}=await requireSupabase().from('attendance').delete().eq('id',id);
+  if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
+}
+
+async function deleteAttendancesFromDB(ids){
+  if(!supabaseClient || !ids || !ids.length) return;
+  const {error}=await requireSupabase().from('attendance').delete().in('id',ids);
+  if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
+}
 
 /* ===================== HELPERS ===================== */
 // ============================================================
@@ -293,7 +327,7 @@ function logout(){
 }
 
 /* ===================== EMPLOYEE TABS ===================== */
-const empTitles = {beranda:"Beranda", absen:"Absen Kehadiran", cuti:"Pengajuan Cuti", gaji:"Gaji Saya", profil:"Profil Saya"};
+const empTitles = {beranda:"Beranda", absen:"Absen Kehadiran", cuti:"Pengajuan Cuti", lembur:"Pengajuan Lembur", gaji:"Gaji Saya", profil:"Profil Saya"};
 let empActiveTab = 'beranda';
 function setEmpTab(tab){
   empActiveTab = tab;
@@ -303,6 +337,7 @@ function setEmpTab(tab){
   if(tab==='beranda') c.innerHTML = renderEmpHome();
   if(tab==='absen') c.innerHTML = renderEmpAbsen();
   if(tab==='cuti') c.innerHTML = renderEmpCuti();
+  if(tab==='lembur') c.innerHTML = renderEmpLembur();
   if(tab==='gaji') c.innerHTML = renderEmpGaji();
   if(tab==='profil') c.innerHTML = renderEmpProfil();
   c.scrollTop = 0;
@@ -323,6 +358,8 @@ function renderEmpHome(){
   const hadir = empAttendanceThisMonth(e.id);
   const cutiSaya = leaves.filter(l=>l.empId===e.id);
   const pending = cutiSaya.filter(l=>l.status==='Menunggu').length;
+  const lemburSaya = overtime.filter(o=>o.empId===e.id);
+  const pendingLembur = lemburSaya.filter(o=>o.status==='Menunggu').length;
   return `
     <div class="hero-card">
       <p class="hero-greet">${todayLabel()}</p>
@@ -343,6 +380,10 @@ function renderEmpHome(){
       <div class="stat-box red" style="cursor:pointer" onclick="openLeaveForm()">
         <div style="font-size:20px; margin-bottom:6px;">🗓️</div>
         <div class="lbl" style="font-weight:700; color:var(--red);">Ajukan Cuti</div>
+      </div>
+      <div class="stat-box blue" style="cursor:pointer; grid-column:1 / -1;" onclick="openOvertimeForm()">
+        <div style="font-size:20px; margin-bottom:6px;">⏱️</div>
+        <div class="lbl" style="font-weight:700; color:var(--navy);">Ajukan Lembur ${pendingLembur ? `<span class="badge amber" style="margin-left:6px;">${pendingLembur} menunggu</span>` : ''}</div>
       </div>
     </div>
 
@@ -479,6 +520,99 @@ function submitLeave(){
   closeModal();
   showToast("Pengajuan cuti terkirim");
   if(empActiveTab==='cuti') setEmpTab('cuti');
+}
+
+// ============================================================
+// PENGAJUAN LEMBUR (KARYAWAN)
+// ============================================================
+function overtimeBadge(status){
+  const map = {"Menunggu":"amber","Disetujui":"green","Ditolak":"red"};
+  return `<span class="badge ${map[status]||'gray'}">${status}</span>`;
+}
+function calcOvertimeHours(timeStart, timeEnd){
+  if(!timeStart || !timeEnd) return 0;
+  const [sh,sm] = timeStart.split(":").map(Number);
+  const [eh,em] = timeEnd.split(":").map(Number);
+  let mins = (eh*60+em) - (sh*60+sm);
+  if(mins < 0) mins += 24*60; // lembur lewat tengah malam
+  return Math.round((mins/60)*100)/100;
+}
+function renderEmpLembur(){
+  const mine = overtime.filter(o=>o.empId===session.empId).slice().reverse();
+  const totalJamBulanIni = overtime
+    .filter(o=>o.empId===session.empId && o.status==='Disetujui' && String(o.date||'').startsWith(currentMonthKey()))
+    .reduce((s,o)=>s+numberOrZero(o.hours),0);
+  return `
+    <div class="card" style="background:var(--blue-soft); border:none; margin-bottom:16px;">
+      <div class="row">
+        <div>
+          <p style="margin:0; font-size:12.5px; color:var(--navy); font-weight:600;">Jam lembur disetujui bulan ini</p>
+          <p style="margin:4px 0 0; font-size:22px; font-weight:800; color:var(--navy);">${totalJamBulanIni} jam</p>
+        </div>
+        <button class="btn btn-navy btn-sm" onclick="openOvertimeForm()">+ Ajukan Lembur</button>
+      </div>
+    </div>
+    <p class="section-label">Riwayat Pengajuan Lembur</p>
+    ${mine.length===0 ? emptyState("⏱️","Belum ada pengajuan","Ajukan lembur melalui tombol di atas") :
+      mine.map(o=>`
+        <div class="list-item" onclick="viewOvertimeDetail('${o.id}')">
+          <div class="li-avatar">⏱️</div>
+          <div style="flex:1;">
+            <p class="li-title">${formatDateID(o.date)}</p>
+            <p class="li-sub">${o.timeStart} – ${o.timeEnd} · ${o.hours} jam</p>
+          </div>
+          ${overtimeBadge(o.status)}
+        </div>
+      `).join("")
+    }
+  `;
+}
+function viewOvertimeDetail(id){
+  const o = overtime.find(x=>x.id===id);
+  if(!o) return;
+  const e = empById(o.empId);
+  openModal("Detail Pengajuan Lembur", `
+    <div class="row" style="margin-bottom:14px;">${overtimeBadge(o.status)}<span style="font-size:12px; color:var(--muted);">Diajukan ${o.applied}</span></div>
+    <div class="slip-line"><span>Nama</span><span style="font-weight:700;">${e ? e.name : '-'}</span></div>
+    <div class="slip-line"><span>Tanggal</span><span style="font-weight:700;">${formatDateID(o.date)}</span></div>
+    <div class="slip-line"><span>Jam Mulai</span><span style="font-weight:700;">${o.timeStart}</span></div>
+    <div class="slip-line"><span>Jam Selesai</span><span style="font-weight:700;">${o.timeEnd}</span></div>
+    <div class="slip-line total"><span>Total Durasi</span><span style="font-weight:800;">${o.hours} jam</span></div>
+    <p style="font-size:12.5px; font-weight:700; margin:16px 0 6px;">Keterangan Lembur</p>
+    <p style="font-size:13.5px; color:var(--text); background:var(--surface); padding:12px; border-radius:12px; margin:0;">${o.reason}</p>
+  `);
+}
+function openOvertimeForm(){
+  const today = todayISO();
+  openModal("Ajukan Lembur", `
+    <div class="field"><label>Tanggal Lembur</label><input type="date" id="otDate" max="${today}" value="${today}"></div>
+    <div class="field-2col">
+      <div class="field"><label>Jam Mulai</label><input type="time" id="otStart"></div>
+      <div class="field"><label>Jam Selesai</label><input type="time" id="otEnd"></div>
+    </div>
+    <div class="field">
+      <label>Keterangan Lembur</label>
+      <textarea id="otReason" placeholder="Jelaskan pekerjaan/keperluan lembur..."></textarea>
+    </div>
+  `, `<button class="btn btn-navy" onclick="submitOvertime()">Kirim Pengajuan</button>`);
+}
+function submitOvertime(){
+  const date = document.getElementById('otDate').value;
+  const timeStart = document.getElementById('otStart').value;
+  const timeEnd = document.getElementById('otEnd').value;
+  const reason = document.getElementById('otReason').value.trim();
+  if(!date || !timeStart || !timeEnd || !reason){ showToast("Lengkapi semua kolom terlebih dahulu"); return; }
+  const hours = calcOvertimeHours(timeStart, timeEnd);
+  if(hours <= 0){ showToast("Jam selesai harus setelah jam mulai"); return; }
+  overtime.push({
+    id:"O"+String(overtime.length ? Math.max(...overtime.map(o=>Number(String(o.id).replace(/^O/,''))||0))+1 : 1).padStart(3,'0'),
+    empId:session.empId, date, timeStart, timeEnd, hours, reason, status:"Menunggu",
+    applied: new Date().toLocaleDateString("id-ID",{day:'numeric',month:'short',year:'numeric'})
+  });
+  saveAppData();
+  closeModal();
+  showToast("Pengajuan lembur terkirim");
+  if(empActiveTab==='lembur') setEmpTab('lembur');
 }
 
 
@@ -1072,7 +1206,7 @@ ${row("Potongan Lainnya",c.otherDeduction)}
 </table>
 
 ${c.note?`<div class="note"><strong>Catatan:</strong><br>${escapeWordHtml(c.note)}</div>`:""}
-<p style="margin-top:30px;font-size:9pt;color:#666">Dokumen diterbitkan melalui Nadi HRIS.</p>
+<p style="margin-top:30px;font-size:9pt;color:#666">Dokumen diterbitkan melalui KaryaOne.</p>
 </body></html>`;
 
   const blob=new Blob(["\ufeff",content],{type:"application/msword"});
@@ -1376,7 +1510,7 @@ function confirmAbsen(){
 }
 
 /* ===================== ADMIN TABS ===================== */
-const admTitles = {dashboard:"Dashboard", karyawan:"Database Karyawan", absensi:"Rekap Absensi", penggajian:"Penggajian", cuti:"Pengajuan Cuti"};
+const admTitles = {dashboard:"Dashboard", karyawan:"Database Karyawan", absensi:"Rekap Absensi", penggajian:"Penggajian", cuti:"Pengajuan Cuti", lembur:"Pengajuan Lembur"};
 let admActiveTab = 'dashboard';
 function setAdmTab(tab){
   admActiveTab = tab;
@@ -1388,6 +1522,7 @@ function setAdmTab(tab){
   if(tab==='absensi') c.innerHTML = renderAdmAbsensi();
   if(tab==='penggajian') c.innerHTML = renderAdmPenggajian();
   if(tab==='cuti') c.innerHTML = renderAdmCuti();
+  if(tab==='lembur') c.innerHTML = renderAdmLembur();
   c.scrollTop = 0;
 }
 
@@ -1725,6 +1860,8 @@ function renderAdmAbsensi(){
       <button class="btn btn-navy" style="width:100%;" onclick="downloadAttendanceRecap('${month}','${empFilter}')">📝 Unduh Rekap Absensi (Word)</button>
     </div>
 
+    ${renderClearAttendanceBox(month, empFilter)}
+
     <p class="section-label">Riwayat Absensi · ${monthLabel(month)}</p>
     ${list.length===0 ? emptyState("📍","Belum ada data absensi","Data akan muncul setelah karyawan melakukan absen") :
       list.map(a=>{
@@ -1780,7 +1917,7 @@ ${recap.map(row).join("")}
 <p style="margin-top:22px;font-size:9pt;color:#666">
 Hari kerja dihitung Senin-Jumat, dibatasi sampai tanggal berjalan untuk bulan yang sedang berlangsung.
 Kolom "Tidak Absen" merupakan estimasi (hari kerja dikurangi hadir dan cuti/izin disetujui).
-Dokumen diterbitkan melalui Nadi HRIS.
+Dokumen diterbitkan melalui KaryaOne.
 </p>
 </body></html>`;
 
@@ -1820,6 +1957,67 @@ function viewAttendanceDetail(id){
   `);
 }
 
+
+// ============================================================
+// HAPUS RIWAYAT ABSENSI (SETELAH GAJIAN)
+// ============================================================
+// Riwayat absensi seorang karyawan untuk suatu bulan hanya boleh
+// dikosongkan setelah slip gaji bulan tersebut sudah diterbitkan,
+// supaya rekap absensi yang jadi dasar penggajian tidak hilang
+// sebelum karyawan menerima gajinya.
+function renderClearAttendanceBox(month, empFilter){
+  if(empFilter === 'all'){
+    return `
+      <div class="card" style="background:var(--surface); border:none;">
+        <p style="font-size:12.5px; color:var(--muted); margin:0;">Pilih satu karyawan tertentu di atas untuk dapat mengosongkan riwayat absensinya (hanya tersedia setelah slip gaji bulan tersebut diterbitkan).</p>
+      </div>`;
+  }
+  const e = empById(empFilter);
+  if(!e) return '';
+  const published = isSalaryPublished(e, month);
+  const count = attendance.filter(a=>a.empId===empFilter && a.date && a.date.startsWith(month)).length;
+  return `
+    <button class="btn btn-outline-red" style="width:100%; margin:4px 0 16px;" ${(!published || count===0) ? 'disabled' : ''}
+      onclick="confirmClearAttendance('${month}','${empFilter}')">
+      🗑 Hapus Riwayat Absensi ${e.name.split(" ")[0]} · ${monthLabel(month)}
+    </button>
+    ${!published ? `<p class="form-help" style="margin-top:-10px;">Slip gaji ${monthLabel(month)} untuk ${e.name} belum diterbitkan, jadi riwayat absensi belum bisa dihapus.</p>` : ''}
+  `;
+}
+function confirmClearAttendance(month, empId){
+  const e = empById(empId);
+  if(!e) return;
+  if(!isSalaryPublished(e, month)){
+    showToast("Slip gaji bulan ini belum diterbitkan.");
+    return;
+  }
+  const targetIds = attendance.filter(a=>a.empId===empId && a.date && a.date.startsWith(month)).map(a=>a.id);
+  if(targetIds.length===0){ showToast("Tidak ada riwayat absensi untuk dihapus."); return; }
+  openModal("Hapus Riwayat Absensi", `
+    <p style="font-size:14px; margin:0;">Yakin ingin menghapus riwayat absensi <strong>${e.name}</strong> untuk bulan
+    <strong>${monthLabel(month)}</strong> (${targetIds.length} catatan)? Gunakan ini hanya setelah gaji periode tersebut sudah dibayarkan. Tindakan ini tidak dapat dibatalkan.</p>
+  `, `
+    <div style="display:flex; gap:10px;">
+      <button class="btn btn-soft" onclick="closeModal()">Batal</button>
+      <button class="btn btn-red" onclick="clearAttendanceHistory('${month}','${empId}')">Ya, Hapus</button>
+    </div>
+  `);
+}
+function clearAttendanceHistory(month, empId){
+  const e = empById(empId);
+  if(!e || !isSalaryPublished(e, month)){
+    showToast("Slip gaji bulan ini belum diterbitkan.");
+    closeModal();
+    return;
+  }
+  const targetIds = attendance.filter(a=>a.empId===empId && a.date && a.date.startsWith(month)).map(a=>a.id);
+  attendance = attendance.filter(a=> !targetIds.includes(a.id));
+  saveAppData();
+  deleteAttendancesFromDB(targetIds);
+  closeModal();
+  showToast(`Riwayat absensi ${e.name} bulan ${monthLabel(month)} dihapus`);
+  if(admActiveTab==='absensi') setAdmTab('absensi');
+}
 
 // ============================================================
 // ADMIN / EDIT TANGGAL BERGABUNG
@@ -2157,6 +2355,128 @@ function clearLeaves(monthFilter){
   showToast("Data cuti dikosongkan");
   window.adminSelectedCutiMonth = 'all';
   setAdmTab('cuti');
+}
+
+// ============================================================
+// PENGAJUAN LEMBUR (ADMIN)
+// ============================================================
+function renderAdmLembur(){
+  const monthFilter = window.adminSelectedLemburMonth || 'all';
+  const allMonths = Array.from(new Set(overtime.map(o=>String(o.date||'').slice(0,7)).filter(Boolean))).sort().reverse();
+  const list = overtime
+    .filter(o=> monthFilter==='all' || String(o.date||'').slice(0,7)===monthFilter)
+    .slice().reverse();
+  const totalJamDisetujui = overtime
+    .filter(o=> o.status==='Disetujui' && (monthFilter==='all' || String(o.date||'').slice(0,7)===monthFilter))
+    .reduce((s,o)=>s+numberOrZero(o.hours),0);
+  const pendingCount = overtime.filter(o=>o.status==='Menunggu').length;
+
+  return `
+    <div class="grid2" style="margin-bottom:16px;">
+      <div class="stat-box amber"><div class="num">${pendingCount}</div><div class="lbl">Menunggu Persetujuan</div></div>
+      <div class="stat-box blue"><div class="num">${totalJamDisetujui}</div><div class="lbl">Total Jam Disetujui</div></div>
+    </div>
+
+    <div class="card">
+      <label class="form-label">Filter Bulan</label>
+      <select id="admLemburMonthPicker" class="form-input" onchange="selectAdminLemburMonth(this.value)">
+        <option value="all" ${monthFilter==='all'?'selected':''}>Semua Bulan</option>
+        ${allMonths.map(m=>`<option value="${m}" ${monthFilter===m?'selected':''}>${monthLabel(m)}</option>`).join("")}
+      </select>
+      <p class="form-help">Pilih bulan tertentu untuk melihat, atau mengosongkan, riwayat lembur bulan tersebut saja.</p>
+    </div>
+
+    <button class="btn btn-outline-red" style="width:100%; margin-bottom:16px;" ${list.length===0?'disabled':''}
+      onclick="confirmClearOvertimes('${monthFilter}')">
+      🗑 Kosongkan ${monthFilter==='all' ? 'Semua Riwayat Lembur' : 'Riwayat Lembur ' + monthLabel(monthFilter)}
+    </button>
+
+    <p class="section-label">${monthFilter==='all' ? 'Semua Pengajuan Lembur' : 'Pengajuan Lembur · ' + monthLabel(monthFilter)}</p>
+    ${list.length===0 ? emptyState("⏱️","Belum ada pengajuan lembur","Pengajuan dari karyawan akan muncul di sini, atau sudah dikosongkan untuk bulan ini") :
+      list.map(o=>{
+        const e = empById(o.empId);
+        return `<div class="card">
+          <div class="row" style="margin-bottom:8px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div class="li-avatar">${e ? e.initials : '?'}</div>
+              <div><p class="li-title">${e ? e.name : '-'}</p><p class="li-sub">${formatDateID(o.date)} · ${o.timeStart}–${o.timeEnd} (${o.hours} jam)</p></div>
+            </div>
+            ${overtimeBadge(o.status)}
+          </div>
+          <p style="font-size:12.5px; color:var(--muted); margin:8px 0 12px;">${o.reason}</p>
+          <div style="display:flex; gap:8px;">
+            ${o.status==='Menunggu' ? `
+              <button class="btn btn-outline-red btn-sm" style="flex:1;" onclick="decideOvertime('${o.id}','Ditolak')">Tolak</button>
+              <button class="btn btn-navy btn-sm" style="flex:1;" onclick="decideOvertime('${o.id}','Disetujui')">Setujui</button>
+            ` : ``}
+            <button class="btn btn-soft btn-sm" style="${o.status==='Menunggu' ? '' : 'flex:1;'}" onclick="confirmDeleteOvertime('${o.id}')">🗑 Hapus</button>
+          </div>
+        </div>`;
+      }).join("")
+    }
+  `;
+}
+function decideOvertime(id, status){
+  const o = overtime.find(x=>x.id===id);
+  if(!o) return;
+  o.status = status;
+  saveAppData();
+  showToast(status==='Disetujui' ? "Pengajuan lembur disetujui" : "Pengajuan lembur ditolak");
+  setAdmTab('lembur');
+}
+function selectAdminLemburMonth(month){
+  window.adminSelectedLemburMonth = month || 'all';
+  setAdmTab('lembur');
+}
+function confirmDeleteOvertime(id){
+  const o = overtime.find(x=>x.id===id);
+  if(!o) return;
+  const e = empById(o.empId);
+  openModal("Hapus Pengajuan Lembur", `
+    <p style="font-size:14px; margin:0;">Yakin ingin menghapus pengajuan lembur <strong>${e ? e.name : '-'}</strong>
+    (${formatDateID(o.date)})? Tindakan ini tidak dapat dibatalkan.</p>
+  `, `
+    <div style="display:flex; gap:10px;">
+      <button class="btn btn-soft" onclick="closeModal()">Batal</button>
+      <button class="btn btn-red" onclick="deleteOvertimeRecord('${id}')">Hapus</button>
+    </div>
+  `);
+}
+function deleteOvertimeRecord(id){
+  overtime = overtime.filter(o=>o.id!==id);
+  saveAppData();
+  deleteOvertimeFromDB(id);
+  closeModal();
+  showToast("Pengajuan lembur dihapus");
+  if(admActiveTab==='lembur') setAdmTab('lembur');
+}
+function confirmClearOvertimes(monthFilter){
+  const targetIds = overtime
+    .filter(o=> monthFilter==='all' || String(o.date||'').slice(0,7)===monthFilter)
+    .map(o=>o.id);
+  if(targetIds.length===0){ showToast("Tidak ada data lembur untuk dihapus."); return; }
+  const label = monthFilter==='all' ? 'seluruh riwayat lembur' : `riwayat lembur bulan ${monthLabel(monthFilter)}`;
+  openModal("Kosongkan Data Lembur", `
+    <p style="font-size:14px; margin:0;">Yakin ingin menghapus ${label} (${targetIds.length} pengajuan)?
+    Tindakan ini tidak dapat dibatalkan.</p>
+  `, `
+    <div style="display:flex; gap:10px;">
+      <button class="btn btn-soft" onclick="closeModal()">Batal</button>
+      <button class="btn btn-red" onclick="clearOvertimes('${monthFilter}')">Ya, Kosongkan</button>
+    </div>
+  `);
+}
+function clearOvertimes(monthFilter){
+  const targetIds = overtime
+    .filter(o=> monthFilter==='all' || String(o.date||'').slice(0,7)===monthFilter)
+    .map(o=>o.id);
+  overtime = overtime.filter(o=> !targetIds.includes(o.id));
+  saveAppData();
+  deleteOvertimesFromDB(targetIds);
+  closeModal();
+  showToast("Data lembur dikosongkan");
+  window.adminSelectedLemburMonth = 'all';
+  setAdmTab('lembur');
 }
 
 /* ===================== CLOCK ===================== */
