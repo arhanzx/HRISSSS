@@ -1,12 +1,12 @@
 :root{
     --white:#ffffff;
     --bg:#F8FAFC;
-    --surface:#F1F5F9;
-    --border:#E2E8F0;
-    --navy:#4F46E5;
-    --navy-deep:#3730A3;
-    --primary-light:#EEF2FF;
-    --blue:#0284C7;
+    --surface:#F3F4F6;
+    --border:#E5E7EB;
+    --navy:#0EA5E9;
+    --navy-deep:#0B3D91;
+    --primary-light:#E0F2FE;
+    --blue:#0369A1;
     --blue-soft:#E0F2FE;
     --red:#DC2626;
     --red-soft:#FEE2E2;
@@ -14,14 +14,14 @@
     --green-soft:#DCFCE7;
     --amber:#D97706;
     --amber-soft:#FEF3C7;
-    --text:#0F172A;
-    --muted:#64748B;
-    --muted-2:#94A3B8;
+    --text:#111827;
+    --muted:#6B7280;
+    --muted-2:#9CA3AF;
     --radius-lg:20px;
     --radius-md:16px;
     --radius-sm:11px;
     --shadow-sm:0 1px 2px rgba(15,23,42,0.05);
-    font-family:"Inter",-apple-system,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-family:"Plus Jakarta Sans",-apple-system,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent; touch-action:manipulation;}
   html{ -webkit-text-size-adjust:100%; text-size-adjust:100%; }
@@ -42,11 +42,13 @@
     overflow-y:auto; -webkit-overflow-scrolling:touch;
   }
   .brand-mark{
-    width:64px; height:64px; border-radius:18px; background:linear-gradient(135deg,var(--navy),var(--blue));
+    width:64px; height:64px; border-radius:18px; background:linear-gradient(135deg,var(--navy),var(--navy-deep));
     display:flex; align-items:center; justify-content:center; color:#fff; font-weight:800; font-size:26px;
     margin-bottom:18px; letter-spacing:-1px;
   }
-  .login-title{font-size:26px; font-weight:800; color:var(--text); margin:0 0 6px; letter-spacing:-0.5px;}
+  .login-title{font-size:26px; font-weight:800; color:var(--text); margin:0 0 4px; letter-spacing:-0.5px;}
+  .login-logo{display:block; width:172px; height:auto; margin:0 auto 16px;}
+  .login-tagline{font-size:13.5px; font-weight:600; color:var(--navy); margin:0 0 14px; text-align:center;}
   .login-sub{font-size:14.5px; color:var(--muted); margin:0 0 30px; line-height:1.5;}
   .role-card{
     border:1.5px solid var(--border); border-radius:var(--radius-md); padding:18px;
@@ -119,6 +121,7 @@
   .hero-stat .l{font-size:10.5px; opacity:.75; margin-top:2px;}
 
   .grid2{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .grid3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;}
   .stat-box{background:var(--surface); border-radius:var(--radius-sm); padding:14px; border:1px solid var(--border); box-shadow:var(--shadow-sm);}
   .stat-box .num{font-size:20px; font-weight:800; color:var(--text);}
   .stat-box .lbl{font-size:11.5px; color:var(--muted); margin-top:2px;}
@@ -128,6 +131,12 @@
   .stat-box.red .num{color:var(--red);}
   .stat-box.green{background:var(--green-soft); border-color:transparent;}
   .stat-box.green .num{color:var(--green);}
+  .stat-box.amber{background:var(--amber-soft); border-color:transparent;}
+  .stat-box.amber .num{color:var(--amber);}
+
+  .seg-toggle{display:flex; gap:6px; background:var(--surface); border-radius:999px; padding:4px; margin-bottom:16px;}
+  .seg-btn{flex:1; border:none; background:transparent; padding:9px 10px; border-radius:999px; font-size:13px; font-weight:600; color:var(--muted); cursor:pointer; font-family:inherit;}
+  .seg-btn.active{background:var(--white); color:var(--navy); box-shadow:var(--shadow-sm);}
 
   .row{display:flex; align-items:center; justify-content:space-between; gap:10px;}
   .btn{
@@ -440,6 +449,12 @@
   }
 }
 
+@media (min-width:900px){
+  #empApp{background:var(--surface);}
+  #empApp .app-header{max-width:480px; margin:0 auto; border-left:1px solid var(--border); border-right:1px solid var(--border);}
+  #empApp .content{max-width:480px; margin:0 auto; border-left:1px solid var(--border); border-right:1px solid var(--border); background:var(--bg);}
+  #empApp .tabbar{left:50% !important; right:auto !important; transform:translateX(-50%); width:480px; border-left:1px solid var(--border); border-right:1px solid var(--border);}
+}
 /* ============================================================
    KPI CARDS (Dashboard)
    ============================================================ */
@@ -486,8 +501,9 @@
 .admin-sidebar{display:none;}
 
 .sidebar-brand{display:flex; align-items:center; gap:10px; padding:18px 18px 14px;}
+.sidebar-logo{height:30px; width:auto; display:block;}
 .sidebar-brand .mark{
-  width:30px; height:30px; border-radius:9px; background:var(--navy); color:#fff; font-weight:800;
+  width:30px; height:30px; border-radius:9px; background:linear-gradient(135deg,var(--navy),var(--navy-deep)); color:#fff; font-weight:800;
   display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0;
 }
 .sidebar-brand .name{font-size:15px; font-weight:800; color:var(--text); letter-spacing:-0.01em;}
