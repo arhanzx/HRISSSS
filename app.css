@@ -450,11 +450,15 @@
 }
 
 @media (min-width:900px){
-  #empApp{background:var(--surface);}
-  #empApp .app-header{max-width:480px; margin:0 auto; border-left:1px solid var(--border); border-right:1px solid var(--border);}
-  #empApp .content{max-width:480px; margin:0 auto; border-left:1px solid var(--border); border-right:1px solid var(--border); background:var(--bg);}
-  #empApp .tabbar{left:50% !important; right:auto !important; transform:translateX(-50%); width:480px; border-left:1px solid var(--border); border-right:1px solid var(--border);}
+  body{background:var(--surface);}
+  #empApp{
+    position:fixed !important; inset:0; margin:auto !important;
+    width:412px !important; height:min(860px, calc(100dvh - 48px)) !important;
+    border-radius:28px; overflow:hidden; border:1px solid var(--border);
+    box-shadow:0 20px 60px rgba(15,23,42,0.18);
+  }
 }
+
 /* ============================================================
    KPI CARDS (Dashboard)
    ============================================================ */
