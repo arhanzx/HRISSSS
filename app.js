@@ -47,8 +47,7 @@ const ADMIN_PASSWORD = "admin123";
 let employees = [];
 let attendance = [];
 let leaves = [];
-let overtime = [];
-let leaveSeq = 3, attSeq = 1, otSeq = 1;
+let leaveSeq = 3, attSeq = 1;
 let session = {role:null, empId:null};
 let cameraStream = null;
 let pendingCapture = {photo:null, loc:null, type:null};
@@ -77,10 +76,10 @@ function isoToJoin(iso){
   return `${String(d).padStart(2,'0')} ${names[m-1]} ${y}`;
 }
 function employeeToRow(e){
-  return {id:e.id,name:e.name,initials:e.initials,position:e.position,dept:e.dept,phone:e.phone,email:e.email,join_date:joinToISO(e.join),base:numberOrZero(e.base),allowance:numberOrZero(e.allowance),deduction:numberOrZero(e.deduction),leave_quota:numberOrZero(e.leaveQuota) || 12,updated_at:new Date().toISOString()};
+  return {id:e.id,name:e.name,initials:e.initials,position:e.position,dept:e.dept,phone:e.phone,email:e.email,join_date:joinToISO(e.join),base:numberOrZero(e.base),allowance:numberOrZero(e.allowance),deduction:numberOrZero(e.deduction),updated_at:new Date().toISOString()};
 }
 function rowToEmployee(r){
-  return {id:r.id,name:r.name,initials:r.initials||initialsOf(r.name||''),position:r.position||'',dept:r.dept||'',phone:r.phone||'',email:r.email||'',join:isoToJoin(r.join_date),base:Number(r.base)||0,allowance:Number(r.allowance)||0,deduction:Number(r.deduction)||0,leaveQuota:(r.leave_quota!=null && r.leave_quota!=='') ? Number(r.leave_quota) : 12};
+  return {id:r.id,name:r.name,initials:r.initials||initialsOf(r.name||''),position:r.position||'',dept:r.dept||'',phone:r.phone||'',email:r.email||'',join:isoToJoin(r.join_date),base:Number(r.base)||0,allowance:Number(r.allowance)||0,deduction:Number(r.deduction)||0};
 }
 function attendanceToRow(a){
   return {id:a.id,emp_id:a.empId,date:a.date,check_in:a.checkIn,check_out:a.checkOut,photo_in:a.photoIn,photo_out:a.photoOut,loc_in:a.locIn,loc_out:a.locOut,status:a.status||null,updated_at:new Date().toISOString()};
@@ -94,12 +93,6 @@ function leaveToRow(l){
 function rowToLeave(r){
   return {id:r.id,empId:r.emp_id,type:r.type,start:String(r.start_date).slice(0,10),end:String(r.end_date).slice(0,10),reason:r.reason||'',status:r.status||'Menunggu',applied:r.applied||''};
 }
-function overtimeToRow(o){
-  return {id:o.id,emp_id:o.empId,date:o.date,time_start:o.timeStart,time_end:o.timeEnd,hours:numberOrZero(o.hours),reason:o.reason,status:o.status,applied:o.applied,updated_at:new Date().toISOString()};
-}
-function rowToOvertime(r){
-  return {id:r.id,empId:r.emp_id,date:String(r.date).slice(0,10),timeStart:r.time_start,timeEnd:r.time_end,hours:Number(r.hours)||0,reason:r.reason||'',status:r.status||'Menunggu',applied:r.applied||''};
-}
 
 async function loadAppData(){
   if(!supabaseClient){
@@ -108,29 +101,25 @@ async function loadAppData(){
   }
   try{
     const sb=requireSupabase();
-    const [er,ar,lr,spr,ser,otr]=await Promise.all([
+    const [er,ar,lr,spr,ser]=await Promise.all([
       sb.from('employees').select('*').order('id'),
       sb.from('attendance').select('*').order('date',{ascending:false}),
       sb.from('leaves').select('*').order('created_at',{ascending:false}),
       sb.from('salary_publications').select('*'),
-      sb.from('salary_edits').select('*'),
-      sb.from('overtime').select('*').order('created_at',{ascending:false})
+      sb.from('salary_edits').select('*')
     ]);
-    for(const result of [er,ar,lr,spr,ser,otr]) if(result.error) throw result.error;
+    for(const result of [er,ar,lr,spr,ser]) if(result.error) throw result.error;
     employees = (er.data || []).map(rowToEmployee);
     attendance=(ar.data||[]).map(rowToAttendance);
     leaves=(lr.data||[]).map(rowToLeave);
-    overtime=(otr.data||[]).map(rowToOvertime);
     salaryPublicationsCache={};
     (spr.data||[]).forEach(r=>salaryPublicationsCache[`${r.emp_id}_${r.month}`]=r);
     salaryEditsCache={};
     (ser.data||[]).forEach(r=>salaryEditsCache[`${r.emp_id}_${r.month}`]=r);
     const leaveNums=leaves.map(l=>Number(String(l.id||'').replace(/^L/,''))).filter(Number.isFinite);
     const attNums=attendance.map(a=>Number(String(a.id||'').replace(/^A/,''))).filter(Number.isFinite);
-    const otNums=overtime.map(o=>Number(String(o.id||'').replace(/^O/,''))).filter(Number.isFinite);
     leaveSeq=leaveNums.length?Math.max(...leaveNums)+1:3;
     attSeq=attNums.length?Math.max(...attNums)+1:1;
-    otSeq=otNums.length?Math.max(...otNums)+1:1;
   }catch(error){
     console.error('Supabase load error',error);
     showToast('Gagal memuat data Supabase. Cek konfigurasi dan SQL.');
@@ -141,13 +130,12 @@ async function saveAppData(){
   if(!supabaseClient) return false;
   try{
     const sb=requireSupabase();
-    const [er,ar,lr,otr]=await Promise.all([
+    const [er,ar,lr]=await Promise.all([
       sb.from('employees').upsert(employees.map(employeeToRow)),
       sb.from('attendance').upsert(attendance.map(attendanceToRow)),
-      sb.from('leaves').upsert(leaves.map(leaveToRow)),
-      sb.from('overtime').upsert(overtime.map(overtimeToRow))
+      sb.from('leaves').upsert(leaves.map(leaveToRow))
     ]);
-    for(const result of [er,ar,lr,otr]) if(result.error) throw result.error;
+    for(const result of [er,ar,lr]) if(result.error) throw result.error;
     return true;
   }catch(error){
     console.error('Supabase save error',error);
@@ -174,30 +162,6 @@ async function deleteLeavesFromDB(ids){
   if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
 }
 
-async function deleteOvertimeFromDB(id){
-  if(!supabaseClient) return;
-  const {error}=await requireSupabase().from('overtime').delete().eq('id',id);
-  if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
-}
-
-async function deleteOvertimesFromDB(ids){
-  if(!supabaseClient || !ids || !ids.length) return;
-  const {error}=await requireSupabase().from('overtime').delete().in('id',ids);
-  if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
-}
-
-async function deleteAttendanceFromDB(id){
-  if(!supabaseClient) return;
-  const {error}=await requireSupabase().from('attendance').delete().eq('id',id);
-  if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
-}
-
-async function deleteAttendancesFromDB(ids){
-  if(!supabaseClient || !ids || !ids.length) return;
-  const {error}=await requireSupabase().from('attendance').delete().in('id',ids);
-  if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
-}
-
 
 /* ===================== HELPERS ===================== */
 // ============================================================
@@ -219,28 +183,6 @@ function showToast(msg){
 }
 function empById(id){ return employees.find(e=>e.id===id); }
 function netSalary(e){ return e.base + e.allowance - e.deduction; }
-
-/* ===================== KUOTA CUTI TAHUNAN ===================== */
-function approvedLeaveDaysInYear(empId, year){
-  const yearStart = new Date(year, 0, 1);
-  const yearEnd = new Date(year, 11, 31);
-  let total = 0;
-  leaves.filter(l => l.empId === empId && l.status === 'Disetujui').forEach(l => {
-    const s = new Date(l.start+"T00:00:00");
-    const en = new Date(l.end+"T00:00:00");
-    const from = s > yearStart ? s : yearStart;
-    const to = en < yearEnd ? en : yearEnd;
-    if(from <= to) total += Math.round((to-from)/86400000) + 1;
-  });
-  return total;
-}
-function leaveQuotaOf(e){
-  return Number.isFinite(Number(e?.leaveQuota)) && e?.leaveQuota!=null ? Number(e.leaveQuota) : 12;
-}
-function remainingLeaveQuota(e, year=new Date().getFullYear()){
-  const used = approvedLeaveDaysInYear(e.id, year);
-  return Math.max(leaveQuotaOf(e) - used, 0);
-}
 
 /* ===================== MODAL ENGINE ===================== */
 function openModal(title, bodyHTML, footHTML){
@@ -387,7 +329,7 @@ function renderEmpHome(){
       <p class="hero-name">Halo, ${e.name.split(" ")[0]} 👋</p>
       <div class="hero-stats">
         <div class="hero-stat"><div class="v">${hadir}</div><div class="l">Hadir bulan ini</div></div>
-        <div class="hero-stat"><div class="v">${remainingLeaveQuota(e)}</div><div class="l">Sisa jatah cuti</div></div>
+        <div class="hero-stat"><div class="v">12</div><div class="l">Sisa jatah cuti</div></div>
         <div class="hero-stat"><div class="v">${pending}</div><div class="l">Cuti menunggu</div></div>
       </div>
     </div>
@@ -423,20 +365,6 @@ function renderTodayStatusRow(){
 }
 
 function renderEmpAbsen(){
-  const sub = window.empAbsenSub || 'presensi';
-  return `
-    <div class="seg-toggle">
-      <button class="seg-btn ${sub==='presensi'?'active':''}" onclick="switchEmpAbsenSub('presensi')">Presensi</button>
-      <button class="seg-btn ${sub==='lembur'?'active':''}" onclick="switchEmpAbsenSub('lembur')">Lembur</button>
-    </div>
-    ${sub==='presensi' ? renderEmpPresensi() : renderEmpLembur()}
-  `;
-}
-function switchEmpAbsenSub(sub){
-  window.empAbsenSub = sub;
-  setEmpTab('absen');
-}
-function renderEmpPresensi(){
   const r = empTodayRecord();
   const mine = attendance.filter(a=>a.empId===session.empId).slice().reverse();
   let actionBtn;
@@ -468,81 +396,6 @@ function renderEmpPresensi(){
     }
   `;
 }
-function renderEmpLembur(){
-  const month = currentMonthKey();
-  const mine = overtime.filter(o=>o.empId===session.empId).slice().reverse();
-  const mineThisMonth = mine.filter(o=>o.date.startsWith(month));
-  const totalJam = mineThisMonth.reduce((s,o)=>s+o.hours,0);
-  return `
-    <div class="card" style="background:var(--blue-soft); border:none; margin-bottom:16px;">
-      <div class="row">
-        <div>
-          <p style="margin:0; font-size:12.5px; color:var(--navy); font-weight:600;">Jam lembur bulan ini</p>
-          <p style="margin:4px 0 0; font-size:22px; font-weight:800; color:var(--navy);">${formatJam(totalJam)}</p>
-        </div>
-        <button class="btn btn-navy btn-sm" onclick="openOvertimeForm()">+ Ajukan Lembur</button>
-      </div>
-    </div>
-    <p class="section-label">Riwayat Pengajuan</p>
-    ${mine.length===0 ? emptyState("⏱️","Belum ada pengajuan lembur","Ajukan lembur melalui tombol di atas") :
-      mine.map(o=>`
-        <div class="card" style="margin-bottom:10px;">
-          <div class="row" style="margin-bottom:6px;">
-            <span style="font-weight:700; font-size:13.5px;">${formatDateID(o.date)}, ${o.timeStart}-${o.timeEnd}</span>
-            ${leaveBadge(o.status)}
-          </div>
-          <div class="row" style="margin-bottom:4px;"><span style="font-size:12.5px; color:var(--muted);">Durasi</span><span style="font-size:12.5px; font-weight:600;">${formatJam(o.hours)}</span></div>
-          <p style="font-size:12.5px; color:var(--muted); margin:6px 0 0;">${o.reason}</p>
-        </div>
-      `).join("")
-    }
-  `;
-}
-function formatJam(h){
-  const rounded = Math.round(h*10)/10;
-  return `${rounded % 1 === 0 ? rounded : rounded.toFixed(1)} jam`;
-}
-function timeToMinutes(t){
-  const [h,m] = String(t).split(':').map(Number);
-  return (h||0)*60 + (m||0);
-}
-function computeOvertimeHours(start,end){
-  let diff = timeToMinutes(end) - timeToMinutes(start);
-  if(diff <= 0) diff += 24*60;
-  return Math.round((diff/60)*10)/10;
-}
-function openOvertimeForm(){
-  const today = todayISO();
-  openModal("Ajukan Lembur", `
-    <div class="field"><label>Tanggal</label><input id="otDate" type="date" value="${today}" max="${today}"></div>
-    <div class="field-2col">
-      <div class="field"><label>Jam Mulai</label><input id="otStart" type="time" value="18:00"></div>
-      <div class="field"><label>Jam Selesai</label><input id="otEnd" type="time" value="20:00"></div>
-    </div>
-    <div class="field"><label>Alasan / Tugas</label><textarea id="otReason" rows="3" placeholder="Contoh: Menyelesaikan laporan bulanan"></textarea></div>
-  `, `<button class="btn btn-navy" onclick="saveOvertime()">Ajukan Lembur</button>`);
-}
-function saveOvertime(){
-  const date = document.getElementById('otDate').value;
-  const timeStart = document.getElementById('otStart').value;
-  const timeEnd = document.getElementById('otEnd').value;
-  const reason = document.getElementById('otReason').value.trim();
-  if(!date || !timeStart || !timeEnd || !reason){ showToast("Lengkapi semua data lembur"); return; }
-  const hours = computeOvertimeHours(timeStart,timeEnd);
-  if(hours <= 0){ showToast("Jam selesai harus setelah jam mulai"); return; }
-
-  overtime.push({
-    id:"O"+String(otSeq++).padStart(3,'0'),
-    empId:session.empId,
-    date, timeStart, timeEnd, hours, reason,
-    status:'Menunggu',
-    applied: new Date().toLocaleDateString("id-ID",{day:'numeric',month:'short',year:'numeric'})
-  });
-  saveAppData();
-  closeModal();
-  showToast("Pengajuan lembur terkirim");
-  setEmpTab('absen');
-}
 function formatDateID(iso){
   return new Date(iso+"T00:00:00").toLocaleDateString("id-ID",{day:'numeric', month:'short', year:'numeric'});
 }
@@ -551,17 +404,13 @@ function emptyState(icon,title,desc){
 }
 
 function renderEmpCuti(){
-  const e = empById(session.empId);
   const mine = leaves.filter(l=>l.empId===session.empId).slice().reverse();
-  const sisa = remainingLeaveQuota(e);
-  const kuota = leaveQuotaOf(e);
   return `
     <div class="card" style="background:var(--blue-soft); border:none; margin-bottom:16px;">
       <div class="row">
         <div>
           <p style="margin:0; font-size:12.5px; color:var(--navy); font-weight:600;">Sisa jatah cuti tahunan</p>
-          <p style="margin:4px 0 0; font-size:22px; font-weight:800; color:var(--navy);">${sisa} hari</p>
-          <p style="margin:2px 0 0; font-size:11.5px; color:var(--navy); opacity:.75;">dari kuota ${kuota} hari/tahun</p>
+          <p style="margin:4px 0 0; font-size:22px; font-weight:800; color:var(--navy);">12 hari</p>
         </div>
         <button class="btn btn-navy btn-sm" onclick="openLeaveForm()">+ Ajukan Cuti</button>
       </div>
@@ -1108,7 +957,7 @@ function viewSlip(month){
   openModal(
     `Slip Gaji · ${monthLabel(month)}`,
     buildSlipBody(e,month),
-    `<button class="btn btn-navy" onclick="downloadSlipWord('${e.id}','${month}')">📄 Lihat & Cetak Slip Gaji</button>`
+    `<button class="btn btn-navy" onclick="downloadSlipWord('${e.id}','${month}')">📝 Download Slip Gaji (Word)</button>`
   );
 }
 
@@ -1162,36 +1011,6 @@ function escapeWordHtml(value){
   return String(value??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
-function openPrintableDocument(title, bodyHtml){
-  const win = window.open('', '_blank');
-  if(!win){
-    showToast("Popup diblokir browser. Izinkan popup untuk melihat dokumen ini.");
-    return;
-  }
-  win.document.open();
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${title}</title>
-<style>
-  *{box-sizing:border-box;}
-  body{font-family:Arial,sans-serif;font-size:11pt;color:#222;margin:0;padding:16px;}
-  .print-bar{position:sticky;top:0;background:#fff;padding:0 0 14px;margin-bottom:10px;border-bottom:1px solid #ddd;display:flex;justify-content:flex-end;}
-  .print-bar button{font-family:inherit;font-size:14px;font-weight:700;padding:11px 18px;border-radius:10px;border:none;background:#0EA5E9;color:#fff;cursor:pointer;}
-  @media print{ .print-bar{display:none;} body{padding:0;} }
-  h1{text-align:center;font-size:18pt;margin-bottom:4px}
-  h2{text-align:center;font-size:12pt;font-weight:normal;margin-top:0}
-  table{width:100%;border-collapse:collapse;margin-top:18px}
-  td,th{border:1px solid #999;padding:8px;text-align:left}
-  th{background:#f2f2f2}.total{font-weight:bold}
-  .note{margin-top:22px;padding:10px;border:1px solid #ccc}
-</style></head>
-<body>
-<div class="print-bar"><button onclick="window.print()">🖨️ Cetak / Simpan sebagai PDF</button></div>
-${bodyHtml}
-</body></html>`);
-  win.document.close();
-}
-
 function downloadSlipWord(empId,month){
   const e=empById(empId);
   if(!e)return;
@@ -1208,7 +1027,20 @@ function downloadSlipWord(empId,month){
 
   const row=(label,value)=>`<tr><td>${escapeWordHtml(label)}</td><td>${escapeWordHtml(rupiah(value))}</td></tr>`;
 
-  const bodyHtml=`
+  const content=`
+<html>
+<head><meta charset="utf-8">
+<title>Slip Gaji ${escapeWordHtml(e.name)} - ${escapeWordHtml(monthLabel(month))}</title>
+<style>
+body{font-family:Arial,sans-serif;font-size:11pt;color:#222}
+h1{text-align:center;font-size:18pt;margin-bottom:4px}
+h2{text-align:center;font-size:12pt;font-weight:normal}
+table{width:100%;border-collapse:collapse;margin-top:18px}
+td,th{border:1px solid #999;padding:8px;text-align:left}
+th{background:#f2f2f2}.total{font-weight:bold}
+.note{margin-top:22px;padding:10px;border:1px solid #ccc}
+</style></head>
+<body>
 <h1>SLIP GAJI</h1>
 <h2>${escapeWordHtml(monthLabel(month))}</h2>
 
@@ -1240,9 +1072,18 @@ ${row("Potongan Lainnya",c.otherDeduction)}
 </table>
 
 ${c.note?`<div class="note"><strong>Catatan:</strong><br>${escapeWordHtml(c.note)}</div>`:""}
-<p style="margin-top:30px;font-size:9pt;color:#666">Dokumen diterbitkan melalui KaryaOne.</p>`;
+<p style="margin-top:30px;font-size:9pt;color:#666">Dokumen diterbitkan melalui Nadi HRIS.</p>
+</body></html>`;
 
-  openPrintableDocument(`Slip Gaji ${e.name} - ${monthLabel(month)}`, bodyHtml);
+  const blob=new Blob(["\ufeff",content],{type:"application/msword"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download=`Slip-Gaji-${e.name.replace(/[^a-z0-9]+/gi,"-")}-${month}.doc`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 
 function downloadSlip(empId, month){
@@ -1668,8 +1509,6 @@ function viewEmployeeDetail(id){
     <div class="slip-line"><span>Nomor HP</span><span style="font-weight:700;">${e.phone}</span></div>
     <div class="slip-line"><span>Email</span><span style="font-weight:700;">${e.email}</span></div>
     <div class="slip-line"><span>Bergabung</span><span style="font-weight:700;">${e.join}</span></div>
-    <div class="slip-line"><span>Kuota Cuti Tahunan</span><span style="font-weight:700;">${leaveQuotaOf(e)} hari</span></div>
-    <div class="slip-line"><span>Sisa Cuti Tahun Ini</span><span style="font-weight:700; color:var(--navy);">${remainingLeaveQuota(e)} hari</span></div>
     <div class="slip-line"><span>Gaji Bersih</span><span style="font-weight:700;">${rupiah(netSalary(e))}</span></div>
   `, `
     <div style="display:flex; gap:10px;">
@@ -1691,7 +1530,6 @@ function openEmployeeForm(id){
     </div>
     <div class="field"><label>Nomor HP</label><input id="fPhone" value="${e?e.phone:''}"></div>
     <div class="field"><label>Email</label><input id="fEmail" value="${e?e.email:''}"></div>
-    <div class="field"><label>Kuota Cuti Tahunan (hari)</label><input id="fLeaveQuota" type="number" min="0" value="${e?leaveQuotaOf(e):12}"></div>
   `, `<button class="btn btn-navy" onclick="saveEmployee(${e?`'${e.id}'`:'null'})">Simpan Data</button>`);
 }
 function saveEmployee(id){
@@ -1700,13 +1538,12 @@ function saveEmployee(id){
   const dept = document.getElementById('fDept').value.trim();
   const phone = document.getElementById('fPhone').value.trim();
   const email = document.getElementById('fEmail').value.trim();
-  const leaveQuota = Math.max(0, parseInt(document.getElementById('fLeaveQuota').value, 10) || 0);
   if(!name || !position){ showToast("Nama dan jabatan wajib diisi"); return; }
   if(id){
     const e = empById(id);
     if(!e) return;
 
-    Object.assign(e, {name, position, dept, phone, email, leaveQuota, initials:initialsOf(name)});
+    Object.assign(e, {name, position, dept, phone, email, initials:initialsOf(name)});
     saveAppData();
     showToast("Data karyawan diperbarui");
   } else {
@@ -1728,8 +1565,7 @@ function saveEmployee(id){
       join:new Date().toLocaleDateString("id-ID",{day:'numeric',month:'short',year:'numeric'}),
       base:5000000,
       allowance:500000,
-      deduction:150000,
-      leaveQuota
+      deduction:150000
     });
 
     saveAppData();
@@ -1833,20 +1669,6 @@ function selectAdminAttendanceEmployee(empId){
 }
 
 function renderAdmAbsensi(){
-  const sub = window.admAbsensiSub || 'rekap';
-  return `
-    <div class="seg-toggle">
-      <button class="seg-btn ${sub==='rekap'?'active':''}" onclick="switchAdmAbsensiSub('rekap')">Rekap Absensi</button>
-      <button class="seg-btn ${sub==='lembur'?'active':''}" onclick="switchAdmAbsensiSub('lembur')">Lembur</button>
-    </div>
-    ${sub==='rekap' ? renderAdmRekapAbsensi() : renderAdmLembur()}
-  `;
-}
-function switchAdmAbsensiSub(sub){
-  window.admAbsensiSub = sub;
-  setAdmTab('absensi');
-}
-function renderAdmRekapAbsensi(){
   const month = window.adminSelectedAttendanceMonth || currentMonthKey();
   const empFilter = window.adminSelectedAttendanceEmp || 'all';
   const recap = attendanceRecapForMonth(month, empFilter);
@@ -1899,9 +1721,8 @@ function renderAdmRekapAbsensi(){
       `).join("")
     }
 
-    <div style="display:flex; gap:8px; margin:14px 0 4px;">
-      <button class="btn btn-navy" style="flex:1;" onclick="downloadAttendanceRecap('${month}','${empFilter}')">📄 Lihat & Cetak Rekap</button>
-      <button class="btn btn-outline-red" style="flex:1;" ${list.length===0?'disabled':''} onclick="confirmClearAttendance('${month}','${empFilter}')">🗑 Kosongkan Riwayat</button>
+    <div style="margin:14px 0 4px;">
+      <button class="btn btn-navy" style="width:100%;" onclick="downloadAttendanceRecap('${month}','${empFilter}')">📝 Unduh Rekap Absensi (Word)</button>
     </div>
 
     <p class="section-label">Riwayat Absensi · ${monthLabel(month)}</p>
@@ -1919,168 +1740,11 @@ function renderAdmRekapAbsensi(){
 }
 
 // ============================================================
-// ADMIN - KELOLA LEMBUR
-// ============================================================
-function selectAdminOvertimeMonth(month){
-  if(!month) return;
-  window.adminSelectedOvertimeMonth = month;
-  setAdmTab("absensi");
-}
-function selectAdminOvertimeEmployee(empId){
-  window.adminSelectedOvertimeEmp = empId || 'all';
-  setAdmTab("absensi");
-}
-function overtimeRecapForMonth(month){
-  return employees.map(e=>{
-    const mine = overtime.filter(o=>o.empId===e.id && o.date && o.date.startsWith(month));
-    const diajukan = mine.reduce((s,o)=>s+o.hours,0);
-    const disetujui = mine.filter(o=>o.status==='Disetujui').reduce((s,o)=>s+o.hours,0);
-    const menunggu = mine.filter(o=>o.status==='Menunggu').reduce((s,o)=>s+o.hours,0);
-    return {emp:e, diajukan, disetujui, menunggu};
-  }).filter(r=>r.diajukan>0);
-}
-function renderAdmLembur(){
-  const month = window.adminSelectedOvertimeMonth || currentMonthKey();
-  const empFilter = window.adminSelectedOvertimeEmp || 'all';
-
-  const list = overtime
-    .filter(o => o.date && o.date.startsWith(month) && (empFilter === 'all' || o.empId === empFilter))
-    .slice().reverse();
-
-  const totalDiajukan = list.reduce((s,o)=>s+o.hours,0);
-  const totalDisetujui = list.filter(o=>o.status==='Disetujui').reduce((s,o)=>s+o.hours,0);
-  const totalMenunggu = list.filter(o=>o.status==='Menunggu').reduce((s,o)=>s+o.hours,0);
-  const recapPerKaryawan = empFilter==='all' ? overtimeRecapForMonth(month) : [];
-
-  return `
-    <div class="card">
-      <label class="form-label">Bulan</label>
-      <input class="form-input" type="month" value="${month}" onchange="selectAdminOvertimeMonth(this.value)">
-      <label class="form-label" style="margin-top:12px;">Karyawan</label>
-      <select class="form-input" onchange="selectAdminOvertimeEmployee(this.value)">
-        <option value="all" ${empFilter==='all'?'selected':''}>Semua Karyawan</option>
-        ${employees.map(e=>`<option value="${e.id}" ${empFilter===e.id?'selected':''}>${e.name}</option>`).join("")}
-      </select>
-    </div>
-
-    <div class="card" style="background:var(--blue-soft); border:none;">
-      <p style="font-size:12.5px; color:var(--navy); margin:0; line-height:1.5;">
-        ℹ️ Jam lembur dihitung otomatis dari selisih <strong>jam mulai</strong> dan <strong>jam selesai</strong> yang diajukan karyawan.
-        "Disetujui" hanya menjumlahkan pengajuan yang sudah kamu setujui — angka inilah yang bisa dipakai sebagai dasar
-        menghitung nominal lembur (jam × tarif per jam) saat mengisi komponen "Lembur" di slip gaji karyawan.
-      </p>
-    </div>
-
-    <div class="grid3" style="margin-bottom:16px;">
-      <div class="stat-box"><div class="num" style="font-size:17px;">${formatJam(totalDiajukan)}</div><div class="lbl">Diajukan</div></div>
-      <div class="stat-box green"><div class="num" style="font-size:17px;">${formatJam(totalDisetujui)}</div><div class="lbl">Disetujui</div></div>
-      <div class="stat-box amber"><div class="num" style="font-size:17px;">${formatJam(totalMenunggu)}</div><div class="lbl">Menunggu</div></div>
-    </div>
-
-    ${recapPerKaryawan.length>0 ? `
-      <p class="section-label">Jam Lembur per Karyawan · ${monthLabel(month)}</p>
-      ${recapPerKaryawan.map(r=>`
-        <div class="list-item" onclick="selectAdminOvertimeEmployee('${r.emp.id}')">
-          <div class="li-avatar">${r.emp.initials}</div>
-          <div style="flex:1;"><p class="li-title">${r.emp.name}</p><p class="li-sub">Diajukan ${formatJam(r.diajukan)} · Menunggu ${formatJam(r.menunggu)}</p></div>
-          <span style="font-weight:800; font-size:14px; color:var(--green);">${formatJam(r.disetujui)}</span>
-        </div>
-      `).join("")}
-    ` : ``}
-
-    <button class="btn btn-outline-red" style="width:100%; margin-bottom:16px;" ${list.length===0?'disabled':''}
-      onclick="confirmClearOvertime('${month}','${empFilter}')">
-      🗑 Kosongkan Riwayat Lembur ${monthLabel(month)}
-    </button>
-
-    <p class="section-label">Pengajuan Lembur · ${monthLabel(month)}</p>
-    ${list.length===0 ? emptyState("⏱️","Belum ada pengajuan lembur","Pengajuan dari karyawan akan muncul di sini") :
-      list.map(o=>{
-        const e = empById(o.empId);
-        return `<div class="card">
-          <div class="row" style="margin-bottom:8px;">
-            <div style="display:flex; align-items:center; gap:10px;">
-              <div class="li-avatar">${e ? e.initials : '?'}</div>
-              <div><p class="li-title">${e ? e.name : '-'}</p><p class="li-sub">${formatDateID(o.date)}, ${o.timeStart}-${o.timeEnd} · ${formatJam(o.hours)}</p></div>
-            </div>
-            ${leaveBadge(o.status)}
-          </div>
-          <p style="font-size:12.5px; color:var(--muted); margin:0 0 12px;">${o.reason}</p>
-          <div style="display:flex; gap:8px;">
-            ${o.status==='Menunggu' ? `
-              <button class="btn btn-outline-red btn-sm" style="flex:1;" onclick="decideOvertime('${o.id}','Ditolak')">Tolak</button>
-              <button class="btn btn-navy btn-sm" style="flex:1;" onclick="decideOvertime('${o.id}','Disetujui')">Setujui</button>
-            ` : ``}
-            <button class="btn btn-soft btn-sm" style="${o.status==='Menunggu' ? '' : 'flex:1;'}" onclick="confirmDeleteOvertime('${o.id}')">🗑 Hapus</button>
-          </div>
-        </div>`;
-      }).join("")
-    }
-  `;
-}
-function decideOvertime(id, status){
-  const o = overtime.find(x=>x.id===id);
-  if(!o) return;
-  o.status = status;
-  saveAppData();
-  showToast(status==='Disetujui' ? "Lembur disetujui" : "Lembur ditolak");
-  setAdmTab('absensi');
-}
-function confirmDeleteOvertime(id){
-  const o = overtime.find(x=>x.id===id);
-  if(!o) return;
-  const e = empById(o.empId);
-  openModal("Hapus Pengajuan Lembur", `
-    <p style="font-size:14px; margin:0;">Yakin ingin menghapus pengajuan lembur <strong>${e ? e.name : '-'}</strong>
-    (${formatDateID(o.date)}, ${o.timeStart}-${o.timeEnd})? Tindakan ini tidak dapat dibatalkan.</p>
-  `, `
-    <div style="display:flex; gap:10px;">
-      <button class="btn btn-soft" onclick="closeModal()">Batal</button>
-      <button class="btn btn-red" onclick="deleteOvertimeRecord('${id}')">Hapus</button>
-    </div>
-  `);
-}
-function deleteOvertimeRecord(id){
-  overtime = overtime.filter(o=>o.id!==id);
-  saveAppData();
-  deleteOvertimeFromDB(id);
-  closeModal();
-  showToast("Pengajuan lembur dihapus");
-  if(admActiveTab==='absensi') setAdmTab('absensi');
-}
-function confirmClearOvertime(month, empFilter){
-  const targetIds = overtime
-    .filter(o=> o.date && o.date.startsWith(month) && (empFilter==='all' || o.empId===empFilter))
-    .map(o=>o.id);
-  if(targetIds.length===0){ showToast("Tidak ada data lembur untuk dihapus."); return; }
-  openModal("Kosongkan Riwayat Lembur", `
-    <p style="font-size:14px; margin:0;">Yakin ingin menghapus riwayat lembur bulan ${monthLabel(month)} (${targetIds.length} pengajuan)?
-    Tindakan ini tidak dapat dibatalkan.</p>
-  `, `
-    <div style="display:flex; gap:10px;">
-      <button class="btn btn-soft" onclick="closeModal()">Batal</button>
-      <button class="btn btn-red" onclick="clearOvertime('${month}','${empFilter}')">Ya, Kosongkan</button>
-    </div>
-  `);
-}
-function clearOvertime(month, empFilter){
-  const targetIds = overtime
-    .filter(o=> o.date && o.date.startsWith(month) && (empFilter==='all' || o.empId===empFilter))
-    .map(o=>o.id);
-  overtime = overtime.filter(o=> !targetIds.includes(o.id));
-  saveAppData();
-  deleteOvertimesFromDB(targetIds);
-  closeModal();
-  showToast("Riwayat lembur dikosongkan");
-  setAdmTab('absensi');
-}
-
-// ============================================================
 // DOWNLOAD REKAP ABSENSI (WORD)
 // ============================================================
 function downloadAttendanceRecap(month, empFilter){
   const recap = attendanceRecapForMonth(month, empFilter || 'all');
-  if(recap.length===0){ showToast("Tidak ada data untuk ditampilkan."); return; }
+  if(recap.length===0){ showToast("Tidak ada data untuk diunduh."); return; }
 
   const row = (r) => `<tr>
     <td>${escapeWordHtml(r.emp.name)}</td>
@@ -2092,7 +1756,19 @@ function downloadAttendanceRecap(month, empFilter){
     <td style="text-align:center;">${r.tidakHadir}</td>
   </tr>`;
 
-  const bodyHtml = `
+  const content = `
+<html>
+<head><meta charset="utf-8">
+<title>Rekap Absensi - ${escapeWordHtml(monthLabel(month))}</title>
+<style>
+body{font-family:Arial,sans-serif;font-size:11pt;color:#222}
+h1{text-align:center;font-size:18pt;margin-bottom:4px}
+h2{text-align:center;font-size:12pt;font-weight:normal;margin-top:0}
+table{width:100%;border-collapse:collapse;margin-top:18px}
+td,th{border:1px solid #999;padding:8px;text-align:left}
+th{background:#f2f2f2}
+</style></head>
+<body>
 <h1>REKAP ABSENSI</h1>
 <h2>${escapeWordHtml(monthLabel(month))}</h2>
 <table>
@@ -2104,10 +1780,20 @@ ${recap.map(row).join("")}
 <p style="margin-top:22px;font-size:9pt;color:#666">
 Hari kerja dihitung Senin-Jumat, dibatasi sampai tanggal berjalan untuk bulan yang sedang berlangsung.
 Kolom "Tidak Absen" merupakan estimasi (hari kerja dikurangi hadir dan cuti/izin disetujui).
-Dokumen diterbitkan melalui KaryaOne.
-</p>`;
+Dokumen diterbitkan melalui Nadi HRIS.
+</p>
+</body></html>`;
 
-  openPrintableDocument(`Rekap Absensi - ${monthLabel(month)}`, bodyHtml);
+  const blob = new Blob(["\ufeff", content], {type:"application/msword"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const suffix = (empFilter && empFilter !== 'all') ? (empById(empFilter)?.name || 'Karyawan') : 'Semua-Karyawan';
+  a.download = `Rekap-Absensi-${suffix.replace(/[^a-z0-9]+/gi,"-")}-${month}.doc`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
 }
 function viewAttendanceDetail(id){
   const a = attendance.find(x=>x.id===id);
@@ -2131,58 +1817,7 @@ function viewAttendanceDetail(id){
       <div class="slip-line"><span>Waktu</span><span style="font-weight:700;">${a.checkOut}</span></div>
       <div class="slip-line"><span>Lokasi</span><span style="font-weight:700;">📍 ${a.locOut}</span></div>
     ` : `<p style="font-size:12.5px; color:var(--amber); font-weight:600; margin-top:14px;">Karyawan belum melakukan absen pulang.</p>`}
-    ${session.role==='admin' ? `
-      <button class="btn btn-outline-red" style="width:100%; margin-top:16px;" onclick="confirmDeleteAttendance('${a.id}')">🗑 Hapus Data Absensi Ini</button>
-    ` : ``}
   `);
-}
-function confirmDeleteAttendance(id){
-  const a = attendance.find(x=>x.id===id);
-  if(!a) return;
-  const e = empById(a.empId);
-  openModal("Hapus Data Absensi", `
-    <p style="font-size:14px; margin:0;">Yakin ingin menghapus data absensi <strong>${e ? e.name : '-'}</strong>
-    (${formatDateID(a.date)})? Tindakan ini tidak dapat dibatalkan.</p>
-  `, `
-    <div style="display:flex; gap:10px;">
-      <button class="btn btn-soft" onclick="closeModal()">Batal</button>
-      <button class="btn btn-red" onclick="deleteAttendanceRecord('${id}')">Hapus</button>
-    </div>
-  `);
-}
-function deleteAttendanceRecord(id){
-  attendance = attendance.filter(a=>a.id!==id);
-  saveAppData();
-  deleteAttendanceFromDB(id);
-  closeModal();
-  showToast("Data absensi dihapus");
-  if(admActiveTab==='absensi') setAdmTab('absensi');
-}
-function confirmClearAttendance(month, empFilter){
-  const targetIds = attendance
-    .filter(a=> a.date && a.date.startsWith(month) && (empFilter==='all' || a.empId===empFilter))
-    .map(a=>a.id);
-  if(targetIds.length===0){ showToast("Tidak ada data absensi untuk dihapus."); return; }
-  openModal("Kosongkan Riwayat Absensi", `
-    <p style="font-size:14px; margin:0;">Yakin ingin menghapus riwayat absensi bulan ${monthLabel(month)} (${targetIds.length} data)?
-    Tindakan ini tidak dapat dibatalkan.</p>
-  `, `
-    <div style="display:flex; gap:10px;">
-      <button class="btn btn-soft" onclick="closeModal()">Batal</button>
-      <button class="btn btn-red" onclick="clearAttendance('${month}','${empFilter}')">Ya, Kosongkan</button>
-    </div>
-  `);
-}
-function clearAttendance(month, empFilter){
-  const targetIds = attendance
-    .filter(a=> a.date && a.date.startsWith(month) && (empFilter==='all' || a.empId===empFilter))
-    .map(a=>a.id);
-  attendance = attendance.filter(a=> !targetIds.includes(a.id));
-  saveAppData();
-  deleteAttendancesFromDB(targetIds);
-  closeModal();
-  showToast("Riwayat absensi dikosongkan");
-  setAdmTab('absensi');
 }
 
 
@@ -2338,7 +1973,7 @@ function renderAdmPenggajian(){
                    : `<button class="btn btn-navy btn-sm" style="flex:1;" onclick="publishSalarySlip('${e.id}','${selectedMonth}',true)">📄 Terbitkan</button>`
                  }
                  <button class="btn btn-soft btn-sm" style="width:100%;" onclick="viewSlipAdmin('${e.id}','${selectedMonth}')">👁 Lihat Slip</button>
-                 <button class="btn btn-soft btn-sm" style="width:100%;" onclick="downloadSlipWord('${e.id}','${selectedMonth}')">📄 Lihat & Cetak</button>`
+                 <button class="btn btn-soft btn-sm" style="width:100%;" onclick="downloadSlipWord('${e.id}','${selectedMonth}')">📝 Download Word</button>`
               : `<button class="btn btn-soft btn-sm" style="width:100%;" disabled>Periode Tidak Berlaku</button>`
             }
           </div>
@@ -2403,7 +2038,7 @@ function viewSlipAdmin(id,selectedMonth=null){
         ? `<button class="btn btn-soft" onclick="unpublishSalarySlip('${e.id}','${month}')">↩ Batalkan Terbit</button>`
         : `<button class="btn btn-navy" onclick="publishSalarySlip('${e.id}','${month}',true)">📄 Terbitkan Slip</button>`
       }
-      <button class="btn btn-soft" onclick="downloadSlipWord('${e.id}','${month}')">📄 Lihat & Cetak</button>
+      <button class="btn btn-soft" onclick="downloadSlipWord('${e.id}','${month}')">📝 Download Word</button>
     </div>`
   );
 }
