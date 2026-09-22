@@ -100,40 +100,100 @@ function rowToOvertime(r){
   return {id:r.id,empId:r.emp_id,date:String(r.date).slice(0,10),timeStart:r.time_start,timeEnd:r.time_end,hours:Number(r.hours)||0,reason:r.reason||'',status:r.status||'Menunggu',applied:r.applied||''};
 }
 
-async function loadAppData(){
-  if(!supabaseClient){
-    showToast("Supabase belum dikonfigurasi; aplikasi berjalan tanpa database.");
+async function openEmployeePicker() {
+
+  // Jika data karyawan belum tersedia,
+  // load hanya tabel employees.
+  if (!employees || employees.length === 0) {
+
+    try {
+
+      if (!employeeReady) {
+        employeeReady = loadEmployeesOnly();
+      }
+
+      await employeeReady;
+
+    } catch (error) {
+
+      console.error(
+        'Employee picker error:',
+        getSupabaseError(error)
+      );
+
+      showToast(
+        'Daftar karyawan gagal dimuat. Silakan coba lagi.'
+      );
+
+      return;
+    }
+  }
+
+
+  // Tidak ada data karyawan
+  if (!employees || employees.length === 0) {
+
+    showToast(
+      'Belum ada data karyawan.'
+    );
+
     return;
   }
-  try{
-    const sb=requireSupabase();
-    const [er,ar,lr,spr,ser,otr]=await Promise.all([
-      sb.from('employees').select('*').order('id'),
-      sb.from('attendance').select('*').order('date',{ascending:false}),
-      sb.from('leaves').select('*').order('created_at',{ascending:false}),
-      sb.from('salary_publications').select('*'),
-      sb.from('salary_edits').select('*'),
-      sb.from('overtime').select('*').order('created_at',{ascending:false})
-    ]);
-    for(const result of [er,ar,lr,spr,ser,otr]) if(result.error) throw result.error;
-    employees = (er.data || []).map(rowToEmployee);
-    attendance=(ar.data||[]).map(rowToAttendance);
-    leaves=(lr.data||[]).map(rowToLeave);
-    overtime=(otr.data||[]).map(rowToOvertime);
-    salaryPublicationsCache={};
-    (spr.data||[]).forEach(r=>salaryPublicationsCache[`${r.emp_id}_${r.month}`]=r);
-    salaryEditsCache={};
-    (ser.data||[]).forEach(r=>salaryEditsCache[`${r.emp_id}_${r.month}`]=r);
-    const leaveNums=leaves.map(l=>Number(String(l.id||'').replace(/^L/,''))).filter(Number.isFinite);
-    const attNums=attendance.map(a=>Number(String(a.id||'').replace(/^A/,''))).filter(Number.isFinite);
-    const otNums=overtime.map(o=>Number(String(o.id||'').replace(/^O/,''))).filter(Number.isFinite);
-    leaveSeq=leaveNums.length?Math.max(...leaveNums)+1:3;
-    attSeq=attNums.length?Math.max(...attNums)+1:1;
-    otSeq=otNums.length?Math.max(...otNums)+1:1;
-  }catch(error){
-    console.error('Supabase load error',error);
-    showToast('Gagal memuat data Supabase. Cek konfigurasi dan SQL.');
-  }
+
+
+  // Buat pilihan karyawan
+  const options =
+    employees
+      .map(e => `
+        <option value="${e.id}">
+          ${e.name} — ${e.position || ''}
+        </option>
+      `)
+      .join('');
+
+
+  openModal(
+
+    'Pilih Akun Karyawan',
+
+    `
+      <p
+        class="field-hint"
+        style="margin-bottom:14px;"
+      >
+        Pilih nama karyawan untuk masuk.
+      </p>
+
+      <div class="field">
+
+        <label>
+          Nama Karyawan
+        </label>
+
+        <select id="pickEmp">
+
+          <option value="">
+            Pilih nama karyawan
+          </option>
+
+          ${options}
+
+        </select>
+
+      </div>
+    `,
+
+    `
+      <button
+        class="btn btn-navy"
+        type="button"
+        onclick="loginAsEmployee()"
+      >
+        Masuk
+      </button>
+    `
+
+  );
 }
 
 async function saveAppData(){
@@ -269,17 +329,99 @@ function setScreen(screenId){
   });
 }
 
-async function openEmployeePicker(){
-  if(window.dataReady) await window.dataReady;
-  const options=employees.map(e=>`<option value="${e.id}">${e.name} — ${e.position}</option>`).join("");
+async function openEmployeePicker() {
+
+  // Jika data karyawan belum tersedia,
+  // load hanya tabel employees.
+  if (!employees || employees.length === 0) {
+
+    try {
+
+      if (!employeeReady) {
+        employeeReady = loadEmployeesOnly();
+      }
+
+      await employeeReady;
+
+    } catch (error) {
+
+      console.error(
+        'Employee picker error:',
+        getSupabaseError(error)
+      );
+
+      showToast(
+        'Daftar karyawan gagal dimuat. Silakan coba lagi.'
+      );
+
+      return;
+    }
+  }
+
+
+  // Tidak ada data karyawan
+  if (!employees || employees.length === 0) {
+
+    showToast(
+      'Belum ada data karyawan.'
+    );
+
+    return;
+  }
+
+
+  // Buat pilihan karyawan
+  const options =
+    employees
+      .map(e => `
+        <option value="${e.id}">
+          ${e.name} — ${e.position || ''}
+        </option>
+      `)
+      .join('');
+
+
   openModal(
-    "Pilih Akun Karyawan",
-    `<p class="field-hint" style="margin-bottom:14px;">Demo: pilih akun karyawan untuk masuk tanpa kata sandi.</p>
-     <div class="field">
-       <label>Nama Karyawan</label>
-       <select id="pickEmp">${options}</select>
-     </div>`,
-    `<button class="btn btn-navy" type="button" onclick="loginAsEmployee()">Masuk</button>`
+
+    'Pilih Akun Karyawan',
+
+    `
+      <p
+        class="field-hint"
+        style="margin-bottom:14px;"
+      >
+        Pilih nama karyawan untuk masuk.
+      </p>
+
+      <div class="field">
+
+        <label>
+          Nama Karyawan
+        </label>
+
+        <select id="pickEmp">
+
+          <option value="">
+            Pilih nama karyawan
+          </option>
+
+          ${options}
+
+        </select>
+
+      </div>
+    `,
+
+    `
+      <button
+        class="btn btn-navy"
+        type="button"
+        onclick="loginAsEmployee()"
+      >
+        Masuk
+      </button>
+    `
+
   );
 }
 
