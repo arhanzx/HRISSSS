@@ -60,6 +60,119 @@ window.supabaseClient = supabaseClient;
 let salaryPublicationsCache = {};
 let salaryEditsCache = {};
 
+// ============================================================
+// DATABASE SAFETY LAYER
+// ============================================================
+
+const DB_READ_RETRIES = 4;
+const DB_WRITE_RETRIES = 3;
+const DB_RETRY_BASE_MS = 700;
+
+let dbWriteQueue = Promise.resolve();
+
+const lastKnownGoodData = {
+  employees: null,
+  attendance: null,
+  leaves: null,
+  overtime: null
+};
+
+function cloneData(value){
+  if(value == null) return value;
+
+  try{
+    return JSON.parse(JSON.stringify(value));
+  }catch(_){
+    return value;
+  }
+}
+
+async function retryDbRead(label, operation, attempts = DB_READ_RETRIES){
+
+  let lastError = null;
+
+  for(let attempt = 1; attempt <= attempts; attempt++){
+
+    try{
+
+      const result = await operation();
+
+      if(result?.error){
+        throw result.error;
+      }
+
+      return result;
+
+    }catch(error){
+
+      lastError = error;
+
+      console.warn(
+        `DB read ${label} gagal (${attempt}/${attempts})`,
+        getSupabaseError(error)
+      );
+
+      if(attempt < attempts){
+        await sleep(DB_RETRY_BASE_MS * attempt);
+      }
+    }
+  }
+
+  throw lastError || new Error(`DB read ${label} gagal.`);
+}
+
+async function retryDbWrite(label, operation, attempts = DB_WRITE_RETRIES){
+
+  let lastError = null;
+
+  for(let attempt = 1; attempt <= attempts; attempt++){
+
+    try{
+
+      const result = await operation();
+
+      if(result?.error){
+        throw result.error;
+      }
+
+      return result;
+
+    }catch(error){
+
+      lastError = error;
+
+      console.warn(
+        `DB write ${label} gagal (${attempt}/${attempts})`,
+        getSupabaseError(error)
+      );
+
+      if(attempt < attempts){
+        await sleep(DB_RETRY_BASE_MS * attempt);
+      }
+    }
+  }
+
+  throw lastError || new Error(`DB write ${label} gagal.`);
+}
+
+function enqueueDbWrite(task){
+
+  const next = dbWriteQueue
+    .catch(() => {})
+    .then(task);
+
+  dbWriteQueue = next.catch(error => {
+
+    console.error(
+      'DB queue error:',
+      getSupabaseError(error)
+    );
+
+  });
+
+  return next;
+}
+
 function requireSupabase(){
   if(!supabaseClient) throw new Error("Supabase belum dikonfigurasi. Isi supabase-config.js terlebih dahulu.");
   return supabaseClient;
@@ -116,283 +229,381 @@ function getSupabaseError(error) {
   };
 }
 
-async function loadEmployeesOnly(retry = 3) {
-  if (!supabaseClient) {
+async function loadEmployeesOnly(retry = DB_READ_RETRIES) {
+
+  if(!supabaseClient){
     throw new Error('Supabase belum dikonfigurasi.');
   }
 
-  try {
-    const sb = requireSupabase();
+  try{
 
     console.log('Memuat daftar karyawan...');
 
-    const { data, error } = await sb
-      .from('employees')
-      .select(`
-        id,
-        name,
-        initials,
-        position,
-        dept,
-        phone,
-        email,
-        join_date,
-        base,
-        allowance,
-        deduction,
-        leave_quota
-      `)
-      .order('name', { ascending: true });
+    const result = await retryDbRead(
+      'employees',
 
-    if (error) throw error;
+      () => requireSupabase()
+        .from('employees')
+        .select(`
+          id,
+          name,
+          initials,
+          position,
+          dept,
+          phone,
+          email,
+          join_date,
+          base,
+          allowance,
+          deduction,
+          leave_quota
+        `)
+        .order('name', { ascending: true }),
 
-    employees = (data || []).map(rowToEmployee);
+      retry
+    );
 
-    console.log(`✓ ${employees.length} karyawan berhasil dimuat.`);
+    const rows = Array.isArray(result.data)
+      ? result.data
+      : [];
+
+    const mapped = rows.map(rowToEmployee);
+
+    /*
+     * Jangan langsung menganggap data kosong sebagai database kosong.
+     *
+     * Jika sebelumnya sudah ada data dan Supabase tiba-tiba
+     * mengembalikan array kosong, gunakan snapshot terakhir
+     * yang diketahui valid.
+     */
+
+    if(mapped.length > 0){
+
+      employees = mapped;
+
+      lastKnownGoodData.employees =
+        cloneData(mapped);
+
+    }else if(
+
+      Array.isArray(employees) &&
+      employees.length > 0 &&
+      lastKnownGoodData.employees
+
+    ){
+
+      console.warn(
+        'Query employees mengembalikan 0 baris. Data lokal dipertahankan.'
+      );
+
+      employees =
+        cloneData(
+          lastKnownGoodData.employees
+        );
+
+    }else{
+
+      employees = [];
+
+      lastKnownGoodData.employees = [];
+    }
+
+    console.log(
+      `✓ ${employees.length} karyawan berhasil dimuat.`
+    );
 
     return employees;
 
-  } catch (error) {
+  }catch(error){
 
     console.error(
       'Employee query error:',
       getSupabaseError(error)
     );
 
-    if (retry > 0) {
+    /*
+     * Jangan pernah menghapus data yang sudah ada hanya
+     * karena query gagal.
+     */
 
-      const attempt = 4 - retry;
-      const delay = attempt * 600;
+    if(
 
-      console.log(
-        `Retry karyawan ${attempt}/3 dalam ${delay}ms...`
-      );
+      (!employees || employees.length === 0) &&
+      Array.isArray(lastKnownGoodData.employees) &&
+      lastKnownGoodData.employees.length > 0
 
-      await sleep(delay);
+    ){
 
-      return loadEmployeesOnly(retry - 1);
+      employees =
+        cloneData(
+          lastKnownGoodData.employees
+        );
     }
 
     throw error;
   }
 }
 
-async function loadBackgroundData() {
+async function loadBackgroundData(){
 
-  if (!supabaseClient) {
+  if(!supabaseClient){
+
     console.warn(
       'Supabase tidak tersedia. Background data dilewati.'
     );
+
     return;
   }
 
-  const sb = requireSupabase();
+  /*
+   * Setiap tabel dibaca secara terpisah.
+   *
+   * Keuntungannya:
+   * - jika attendance gagal, employees tidak ikut terganggu
+   * - jika overtime gagal, leaves tidak ikut kosong
+   * - setiap query mempunyai retry sendiri
+   */
 
-  const results = await Promise.allSettled([
+  const loadTable = async (
+    label,
+    queryFactory,
+    mapper,
+    stateKey,
+    assign
+  ) => {
 
-    sb
-      .from('attendance')
-      .select('*')
-      .order('date', { ascending: false }),
+    try{
 
-    sb
-      .from('leaves')
-      .select('*')
-      .order('created_at', { ascending: false }),
+      const result =
+        await retryDbRead(
+          label,
+          queryFactory
+        );
 
-    sb
-      .from('salary_publications')
-      .select('*'),
+      const rows =
+        Array.isArray(result.data)
+          ? result.data
+          : [];
 
-    sb
-      .from('salary_edits')
-      .select('*'),
+      const mapped =
+        rows.map(mapper);
 
-    sb
-      .from('overtime')
-      .select('*')
-      .order('created_at', { ascending: false })
+      /*
+       * Jika berhasil mendapatkan data:
+       * gunakan data terbaru.
+       */
+
+      if(mapped.length > 0){
+
+        assign(mapped);
+
+        lastKnownGoodData[stateKey] =
+          cloneData(mapped);
+
+      }
+
+      /*
+       * Jika hasil kosong tetapi sebelumnya ada data,
+       * jangan langsung menghapus data lama.
+       */
+
+      else if(
+
+        Array.isArray(lastKnownGoodData[stateKey]) &&
+        lastKnownGoodData[stateKey].length > 0
+
+      ){
+
+        console.warn(
+          `DB ${label} mengembalikan 0 baris. Snapshot terakhir dipertahankan.`
+        );
+
+        assign(
+          cloneData(
+            lastKnownGoodData[stateKey]
+          )
+        );
+
+      }
+
+      /*
+       * Jika memang sejak awal database kosong,
+       * array kosong memang valid.
+       */
+
+      else{
+
+        assign([]);
+
+        lastKnownGoodData[stateKey] = [];
+      }
+
+      return true;
+
+    }catch(error){
+
+      console.error(
+        `${label} load error:`,
+        getSupabaseError(error)
+      );
+
+      /*
+       * PENTING:
+       * ketika query gagal, jangan pernah mengganti
+       * data lama menjadi [].
+       */
+
+      return false;
+    }
+  };
+
+
+  await Promise.all([
+
+    // ========================================================
+    // ATTENDANCE
+    // ========================================================
+
+    loadTable(
+
+      'attendance',
+
+      () =>
+        requireSupabase()
+          .from('attendance')
+          .select('*')
+          .order('date', {
+            ascending: false
+          }),
+
+      rowToAttendance,
+
+      'attendance',
+
+      value => {
+        attendance = value;
+      }
+    ),
+
+
+    // ========================================================
+    // LEAVES
+    // ========================================================
+
+    loadTable(
+
+      'leaves',
+
+      () =>
+        requireSupabase()
+          .from('leaves')
+          .select('*')
+          .order('created_at', {
+            ascending: false
+          }),
+
+      rowToLeave,
+
+      'leaves',
+
+      value => {
+        leaves = value;
+      }
+    ),
+
+
+    // ========================================================
+    // SALARY PUBLICATIONS
+    // ========================================================
+
+    loadTable(
+
+      'salary_publications',
+
+      () =>
+        requireSupabase()
+          .from('salary_publications')
+          .select('*'),
+
+      row => row,
+
+      'salaryPublications',
+
+      value => {
+
+        salaryPublicationsCache = {};
+
+        value.forEach(row => {
+
+          salaryPublicationsCache[
+            `${row.emp_id}_${row.month}`
+          ] = row;
+
+        });
+
+      }
+    ),
+
+
+    // ========================================================
+    // SALARY EDITS
+    // ========================================================
+
+    loadTable(
+
+      'salary_edits',
+
+      () =>
+        requireSupabase()
+          .from('salary_edits')
+          .select('*'),
+
+      row => row,
+
+      'salaryEdits',
+
+      value => {
+
+        salaryEditsCache = {};
+
+        value.forEach(row => {
+
+          salaryEditsCache[
+            `${row.emp_id}_${row.month}`
+          ] = row;
+
+        });
+
+      }
+    ),
+
+
+    // ========================================================
+    // OVERTIME
+    // ========================================================
+
+    loadTable(
+
+      'overtime',
+
+      () =>
+        requireSupabase()
+          .from('overtime')
+          .select('*')
+          .order('created_at', {
+            ascending: false
+          }),
+
+      rowToOvertime,
+
+      'overtime',
+
+      value => {
+        overtime = value;
+      }
+    )
 
   ]);
-
-
-  // ==========================================================
-  // ATTENDANCE
-  // ==========================================================
-
-  const attendanceResult = results[0];
-
-  if (
-    attendanceResult.status === 'fulfilled' &&
-    !attendanceResult.value.error
-  ) {
-
-    attendance =
-      (attendanceResult.value.data || [])
-      .map(rowToAttendance);
-
-    console.log(
-      `✓ ${attendance.length} data absensi dimuat.`
-    );
-
-  } else {
-
-    const error =
-      attendanceResult.status === 'rejected'
-        ? attendanceResult.reason
-        : attendanceResult.value.error;
-
-    console.error(
-      'Attendance load error:',
-      getSupabaseError(error)
-    );
-  }
-
-
-  // ==========================================================
-  // LEAVES
-  // ==========================================================
-
-  const leaveResult = results[1];
-
-  if (
-    leaveResult.status === 'fulfilled' &&
-    !leaveResult.value.error
-  ) {
-
-    leaves =
-      (leaveResult.value.data || [])
-      .map(rowToLeave);
-
-    console.log(
-      `✓ ${leaves.length} data cuti dimuat.`
-    );
-
-  } else {
-
-    const error =
-      leaveResult.status === 'rejected'
-        ? leaveResult.reason
-        : leaveResult.value.error;
-
-    console.error(
-      'Leaves load error:',
-      getSupabaseError(error)
-    );
-  }
-
-
-  // ==========================================================
-  // SALARY PUBLICATIONS
-  // ==========================================================
-
-  const salaryPublicationResult = results[2];
-
-  if (
-    salaryPublicationResult.status === 'fulfilled' &&
-    !salaryPublicationResult.value.error
-  ) {
-
-    salaryPublicationsCache = {};
-
-    (salaryPublicationResult.value.data || [])
-      .forEach(row => {
-
-        salaryPublicationsCache[
-          `${row.emp_id}_${row.month}`
-        ] = row;
-
-      });
-
-    console.log(
-      '✓ Data publikasi gaji dimuat.'
-    );
-
-  } else {
-
-    const error =
-      salaryPublicationResult.status === 'rejected'
-        ? salaryPublicationResult.reason
-        : salaryPublicationResult.value.error;
-
-    console.error(
-      'Salary publication load error:',
-      getSupabaseError(error)
-    );
-  }
-
-
-  // ==========================================================
-  // SALARY EDITS
-  // ==========================================================
-
-  const salaryEditResult = results[3];
-
-  if (
-    salaryEditResult.status === 'fulfilled' &&
-    !salaryEditResult.value.error
-  ) {
-
-    salaryEditsCache = {};
-
-    (salaryEditResult.value.data || [])
-      .forEach(row => {
-
-        salaryEditsCache[
-          `${row.emp_id}_${row.month}`
-        ] = row;
-
-      });
-
-    console.log(
-      '✓ Data edit gaji dimuat.'
-    );
-
-  } else {
-
-    const error =
-      salaryEditResult.status === 'rejected'
-        ? salaryEditResult.reason
-        : salaryEditResult.value.error;
-
-    console.error(
-      'Salary edits load error:',
-      getSupabaseError(error)
-    );
-  }
-
-
-  // ==========================================================
-  // OVERTIME
-  // ==========================================================
-
-  const overtimeResult = results[4];
-
-  if (
-    overtimeResult.status === 'fulfilled' &&
-    !overtimeResult.value.error
-  ) {
-
-    overtime =
-      (overtimeResult.value.data || [])
-      .map(rowToOvertime);
-
-    console.log(
-      `✓ ${overtime.length} data lembur dimuat.`
-    );
-
-  } else {
-
-    const error =
-      overtimeResult.status === 'rejected'
-        ? overtimeResult.reason
-        : overtimeResult.value.error;
-
-    console.error(
-      'Overtime load error:',
-      getSupabaseError(error)
-    );
-  }
 
 
   // ==========================================================
@@ -409,6 +620,7 @@ async function loadBackgroundData() {
       )
       .filter(Number.isFinite);
 
+
   const attNums =
     attendance
       .map(a =>
@@ -418,6 +630,7 @@ async function loadBackgroundData() {
         )
       )
       .filter(Number.isFinite);
+
 
   const otNums =
     overtime
@@ -435,10 +648,12 @@ async function loadBackgroundData() {
       ? Math.max(...leaveNums) + 1
       : 3;
 
+
   attSeq =
     attNums.length
       ? Math.max(...attNums) + 1
       : 1;
+
 
   otSeq =
     otNums.length
@@ -450,7 +665,6 @@ async function loadBackgroundData() {
     '✓ Background database selesai dimuat.'
   );
 }
-
 
 async function loadAppData() {
 
@@ -558,20 +772,137 @@ async function loadAppData() {
 }
 
 async function saveAppData(){
-  if(!supabaseClient) return false;
+
+  if(!supabaseClient){
+    return false;
+  }
+
   try{
-    const sb=requireSupabase();
-    const [er,ar,lr,otr]=await Promise.all([
-      sb.from('employees').upsert(employees.map(employeeToRow)),
-      sb.from('attendance').upsert(attendance.map(attendanceToRow)),
-      sb.from('leaves').upsert(leaves.map(leaveToRow)),
-      sb.from('overtime').upsert(overtime.map(overtimeToRow))
-    ]);
-    for(const result of [er,ar,lr,otr]) if(result.error) throw result.error;
-    return true;
+
+    /*
+     * Semua proses save masuk ke satu antrean.
+     *
+     * Jadi kalau:
+     *
+     * save
+     * save
+     * save
+     *
+     * dipanggil sangat cepat, prosesnya tetap dijalankan
+     * satu per satu dan tidak saling bertabrakan.
+     */
+
+    return await enqueueDbWrite(
+      async () => {
+
+        const sb =
+          requireSupabase();
+
+
+        /*
+         * Snapshot dibuat ketika proses benar-benar
+         * mendapatkan giliran.
+         */
+
+        const employeeRows =
+          employees.map(employeeToRow);
+
+        const attendanceRows =
+          attendance.map(attendanceToRow);
+
+        const leaveRows =
+          leaves.map(leaveToRow);
+
+        const overtimeRows =
+          overtime.map(overtimeToRow);
+
+
+        await Promise.all([
+
+          retryDbWrite(
+
+            'employees upsert',
+
+            () =>
+              sb
+                .from('employees')
+                .upsert(employeeRows)
+
+          ),
+
+
+          retryDbWrite(
+
+            'attendance upsert',
+
+            () =>
+              sb
+                .from('attendance')
+                .upsert(attendanceRows)
+
+          ),
+
+
+          retryDbWrite(
+
+            'leaves upsert',
+
+            () =>
+              sb
+                .from('leaves')
+                .upsert(leaveRows)
+
+          ),
+
+
+          retryDbWrite(
+
+            'overtime upsert',
+
+            () =>
+              sb
+                .from('overtime')
+                .upsert(overtimeRows)
+
+          )
+
+        ]);
+
+
+        /*
+         * Semua proses save berhasil.
+         * Simpan snapshot terakhir yang valid.
+         */
+
+        lastKnownGoodData.employees =
+          cloneData(employees);
+
+        lastKnownGoodData.attendance =
+          cloneData(attendance);
+
+        lastKnownGoodData.leaves =
+          cloneData(leaves);
+
+        lastKnownGoodData.overtime =
+          cloneData(overtime);
+
+
+        return true;
+
+      }
+    );
+
   }catch(error){
-    console.error('Supabase save error',error);
-    showToast('Gagal menyimpan ke Supabase.');
+
+    console.error(
+      'Supabase save error',
+      getSupabaseError(error)
+    );
+
+    showToast(
+      'Gagal menyimpan ke Supabase. Perubahan belum dianggap tersimpan.'
+    );
+
     return false;
   }
 }
@@ -668,47 +999,298 @@ async function openEmployeePicker(){
 }
 
 async function deleteEmployeeFromDB(id){
-  if(!supabaseClient) return;
-  const {error}=await requireSupabase().from('employees').delete().eq('id',id);
-  if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
+
+  if(!supabaseClient){
+    return false;
+  }
+
+  try{
+
+    await enqueueDbWrite(
+
+      () =>
+        retryDbWrite(
+
+          `delete employee ${id}`,
+
+          () =>
+            requireSupabase()
+              .from('employees')
+              .delete()
+              .eq('id', id)
+
+        )
+
+    );
+
+    return true;
+
+  }catch(error){
+
+    console.error(error);
+
+    showToast(
+      'Gagal menghapus karyawan dari Supabase.'
+    );
+
+    return false;
+  }
 }
+
 
 async function deleteLeaveFromDB(id){
-  if(!supabaseClient) return;
-  const {error}=await requireSupabase().from('leaves').delete().eq('id',id);
-  if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
+
+  if(!supabaseClient){
+    return false;
+  }
+
+  try{
+
+    await enqueueDbWrite(
+
+      () =>
+        retryDbWrite(
+
+          `delete leave ${id}`,
+
+          () =>
+            requireSupabase()
+              .from('leaves')
+              .delete()
+              .eq('id', id)
+
+        )
+
+    );
+
+    return true;
+
+  }catch(error){
+
+    console.error(error);
+
+    showToast(
+      'Gagal menghapus data cuti dari Supabase.'
+    );
+
+    return false;
+  }
 }
+
 
 async function deleteLeavesFromDB(ids){
-  if(!supabaseClient || !ids || !ids.length) return;
-  const {error}=await requireSupabase().from('leaves').delete().in('id',ids);
-  if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
+
+  if(
+    !supabaseClient ||
+    !ids ||
+    !ids.length
+  ){
+
+    return true;
+  }
+
+  try{
+
+    await enqueueDbWrite(
+
+      () =>
+        retryDbWrite(
+
+          'delete leaves batch',
+
+          () =>
+            requireSupabase()
+              .from('leaves')
+              .delete()
+              .in('id', ids)
+
+        )
+
+    );
+
+    return true;
+
+  }catch(error){
+
+    console.error(error);
+
+    showToast(
+      'Gagal menghapus data cuti dari Supabase.'
+    );
+
+    return false;
+  }
 }
+
 
 async function deleteOvertimeFromDB(id){
-  if(!supabaseClient) return;
-  const {error}=await requireSupabase().from('overtime').delete().eq('id',id);
-  if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
+
+  if(!supabaseClient){
+    return false;
+  }
+
+  try{
+
+    await enqueueDbWrite(
+
+      () =>
+        retryDbWrite(
+
+          `delete overtime ${id}`,
+
+          () =>
+            requireSupabase()
+              .from('overtime')
+              .delete()
+              .eq('id', id)
+
+        )
+
+    );
+
+    return true;
+
+  }catch(error){
+
+    console.error(error);
+
+    showToast(
+      'Gagal menghapus data lembur dari Supabase.'
+    );
+
+    return false;
+  }
 }
+
 
 async function deleteOvertimesFromDB(ids){
-  if(!supabaseClient || !ids || !ids.length) return;
-  const {error}=await requireSupabase().from('overtime').delete().in('id',ids);
-  if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
+
+  if(
+    !supabaseClient ||
+    !ids ||
+    !ids.length
+  ){
+
+    return true;
+  }
+
+  try{
+
+    await enqueueDbWrite(
+
+      () =>
+        retryDbWrite(
+
+          'delete overtime batch',
+
+          () =>
+            requireSupabase()
+              .from('overtime')
+              .delete()
+              .in('id', ids)
+
+        )
+
+    );
+
+    return true;
+
+  }catch(error){
+
+    console.error(error);
+
+    showToast(
+      'Gagal menghapus data lembur dari Supabase.'
+    );
+
+    return false;
+  }
 }
+
 
 async function deleteAttendanceFromDB(id){
-  if(!supabaseClient) return;
-  const {error}=await requireSupabase().from('attendance').delete().eq('id',id);
-  if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
+
+  if(!supabaseClient){
+    return false;
+  }
+
+  try{
+
+    await enqueueDbWrite(
+
+      () =>
+        retryDbWrite(
+
+          `delete attendance ${id}`,
+
+          () =>
+            requireSupabase()
+              .from('attendance')
+              .delete()
+              .eq('id', id)
+
+        )
+
+    );
+
+    return true;
+
+  }catch(error){
+
+    console.error(error);
+
+    showToast(
+      'Gagal menghapus data absensi dari Supabase.'
+    );
+
+    return false;
+  }
 }
+
 
 async function deleteAttendancesFromDB(ids){
-  if(!supabaseClient || !ids || !ids.length) return;
-  const {error}=await requireSupabase().from('attendance').delete().in('id',ids);
-  if(error){ console.error(error); showToast('Gagal menghapus dari Supabase.'); }
-}
 
+  if(
+    !supabaseClient ||
+    !ids ||
+    !ids.length
+  ){
+
+    return true;
+  }
+
+  try{
+
+    await enqueueDbWrite(
+
+      () =>
+        retryDbWrite(
+
+          'delete attendance batch',
+
+          () =>
+            requireSupabase()
+              .from('attendance')
+              .delete()
+              .in('id', ids)
+
+        )
+
+    );
+
+    return true;
+
+  }catch(error){
+
+    console.error(error);
+
+    showToast(
+      'Gagal menghapus data absensi dari Supabase.'
+    );
+
+    return false;
+  }
+}
 
 /* ===================== HELPERS ===================== */
 // ============================================================
@@ -3034,3 +3616,31 @@ setInterval(tickClock, 15000);
 
 // Initial database boot. Login remains visible while data loads.
 window.dataReady = loadAppData();
+
+
+// ============================================================
+// AUTO RECOVERY SAAT INTERNET KEMBALI
+// ============================================================
+
+window.addEventListener('online', () => {
+
+  if(!supabaseClient){
+    return;
+  }
+
+  console.log(
+    'Koneksi kembali online. Menyegarkan data HRIS...'
+  );
+
+  window.dataReady =
+    loadAppData()
+      .catch(error => {
+
+        console.error(
+          'Online recovery error:',
+          getSupabaseError(error)
+        );
+
+      });
+
+});;
